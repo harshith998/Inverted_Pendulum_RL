@@ -1,0 +1,30 @@
+Concise Conceptual Plan
+
+System architecture has three modules:
+
+Module 1 — Structural Graph Encoder (Option B)
+Takes a graph where nodes are joints (type, relative angle, angular velocity) and edges are rods (length, mass, bidirectional). Runs a Graph Transformer to produce a fixed-size structural embedding per episode. This is recomputed only when the configuration changes.
+
+Module 2 — System Identification Network
+Takes a short trajectory of free dynamics (N timesteps of joint angles/velocities after release). Predicts [length, mass] for each rod. This output is used to construct the graph fed into Module 1. Trained separately with supervised loss on known configs, then frozen or jointly fine-tuned.
+
+Module 3 — Control Policy
+At each timestep takes: current dynamic state (relative angles, angular velocities along the chain) + structural embedding from Module 1. Outputs cart force. Standard actor-critic (PPO or SAC).
+
+Training regime:
+
+1. Train Module 1 + Module 3 jointly with known params (domain-randomized configurations). Module 2 is bypassed — params go directly into the graph.
+2. Train Module 2 separately: generate rollouts from known configs, supervise on param prediction.
+3. At evaluation: chain Module 2 -> Module 1 -> Module 3. Test on out-of-distribution configs.
+
+The core experiments:
+
+1. In-distribution control performance (all three models vs. fixed MLP baseline)
+2. OOD generalization curves: sweep delta-length and delta-mass outside training range, compare performance dropoff shapes
+3. Zero-shot compositional shift: train on N-link, test on (N+1)-link with Module 2 inferring new params
+4. Ablation: Module 2 with ground-truth params vs. inferred params — quantifies ID error impact on control
+
+Observation representation:
+- Node features: type (one-hot), relative angle, angular velocity — all relative, no global mixing
+- Edge features: length, mass (explicit, not density), bidirectional edges
+- Global context (gravity, limits) appended to every node or as global node — keep simple
