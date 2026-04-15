@@ -1,16 +1,11 @@
 """
-Graph construction from pendulum config + current dynamic state.
-
-Graph topology
---------------
-Nodes  : cart (index 0) + one node per joint/endpoint (indices 1..n_links)
+Nodes  : cart (index 0) + one node per joint (indices 1..n_links)
          Total n_nodes = n_links + 1
 
 Edges  : one bidirectional pair per rod → 2 * n_links directed edges
          Rod i connects node i (parent) to node i+1 (child) and back.
 
-Node feature vector  (NODE_FEAT_DIM = 8)
------------------------------------------
+Node feature vector:
   Index  Field         Cart node   Joint node  End node
   -----  -----------   ---------   ----------  --------
   0      is_cart       1           0           0
@@ -18,12 +13,11 @@ Node feature vector  (NODE_FEAT_DIM = 8)
   2      is_end        0           0           1
   3      sin(theta)    0           sin(θᵢ)     sin(θₙ)
   4      cos(theta)    0*          cos(θᵢ)     cos(θₙ)
-  5      theta_dot     0           θ̇ᵢ          θ̇ₙ
+  5      theta vel.    0           θ̇ᵢ          θ̇ₙ
   6      x_cart        x           0           0
-  7      xdot_cart     ẋ           0           0
+  7      xvel.         ẋ           0           0
 
-  *cos(theta) is padded to 0 for the cart (not 1) so the network can learn
-   that the feature is undefined rather than inferring a zero-angle.
+  *cos(theta) is padded to 0 for the cart
 
 Edge feature vector  (EDGE_FEAT_DIM = 2)
 -----------------------------------------
@@ -70,21 +64,7 @@ def build_graph(
     joint_angles: np.ndarray,
     joint_vels: np.ndarray,
 ) -> PendulumGraph:
-    """
-    Construct the graph for one timestep.
-
-    Parameters
-    ----------
-    config       : physical parameters (n_links, lengths, masses, cart_mass)
-    cart_pos     : cart x position in metres
-    cart_vel     : cart x velocity in m/s
-    joint_angles : (n_links,) joint angles from upright in radians
-    joint_vels   : (n_links,) angular velocities in rad/s
-
-    Returns
-    -------
-    PendulumGraph with correctly shaped and typed arrays.
-    """
+   
     n = config.n_links
     n_nodes = n + 1
     n_edges = 2 * n

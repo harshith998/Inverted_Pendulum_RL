@@ -67,6 +67,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import time
 import numpy as np
 import mujoco
 from scipy.integrate import solve_ivp
@@ -75,9 +76,7 @@ from env.mujoco_builder import PendulumConfig, build_mjcf
 from graph.graph_builder import build_graph, NODE_FEAT_DIM, EDGE_FEAT_DIM
 from graph.graph_utils import validate_graph, graph_summary
 
-# ---------------------------------------------------------------------------
-# Test parameters — single known configuration
-# ---------------------------------------------------------------------------
+
 M_CART = 5.0    # kg
 M_ROD  = 0.1    # kg
 L      = 1.0    # m
@@ -95,10 +94,7 @@ TOL_CARTVEL  = 5e-3   # m/s
 TOL_ENERGY   = 0.005  # 0.5% relative energy drift
 
 
-# ---------------------------------------------------------------------------
-# Exact Lagrangian equations of motion
-# ---------------------------------------------------------------------------
-
+# Equations of motion
 def eom(t, y):
     """
     Equations of motion for a single-link inverted pendulum on a frictionless cart.
@@ -398,6 +394,7 @@ def test_graph_for_multi_link():
 # Runner
 # ---------------------------------------------------------------------------
 
+
 if __name__ == "__main__":
     all_tests = [
         test_xml_generation,
@@ -406,6 +403,9 @@ if __name__ == "__main__":
         test_graph_construction,
         test_graph_for_multi_link,
     ]
+
+    # Run visual test separately — no pass/fail, just opens a window.
+    run_visual = "--visual" in sys.argv
     passed = 0
     failed = 0
     for test_fn in all_tests:
@@ -422,5 +422,6 @@ if __name__ == "__main__":
 
     print(f"\n{'='*50}")
     print(f"Results: {passed} passed, {failed} failed out of {len(all_tests)} tests")
+
     if failed:
         sys.exit(1)

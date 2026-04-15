@@ -1,9 +1,3 @@
-"""
-Graph utility functions.
-
-Keeps graph_builder.py focused on construction logic.
-This module handles anything needed to inspect or validate a graph.
-"""
 
 from __future__ import annotations
 

@@ -1,10 +1,3 @@
-"""
-Reward functions for the variable inverted pendulum environment.
-
-All rewards are computed from raw (unnormalised) state values.
-The total reward per step is a weighted sum of components defined in default.yaml.
-"""
-
 import numpy as np
 
 
@@ -17,21 +10,7 @@ def compute_reward(
     force_penalty: float = 0.001,
     rail_penalty: float = 0.01,
 ) -> tuple[float, dict]:
-    """
-    Compute the per-step reward and a breakdown dict for logging.
-
-    Parameters
-    ----------
-    joint_angles : (n_links,) array of joint angles in radians from upright.
-                   theta=0 means perfectly vertical, so cos(0)=1 is the maximum.
-    cart_pos     : cart x position in metres.
-    action       : scalar force applied to the cart (Newtons).
-
-    Returns
-    -------
-    total_reward : float
-    components   : dict with individual reward terms for logging/debugging
-    """
+    
     # Each link contributes cos(theta): 1.0 when upright, decreases as it falls.
     upright = float(np.sum(np.cos(joint_angles)))
 
