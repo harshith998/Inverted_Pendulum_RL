@@ -1,3 +1,5 @@
+# Run: python3.12 tests/test_physics.py
+
 """
 Physics validation test for the variable inverted pendulum environment.
 
@@ -67,7 +69,6 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import time
 import numpy as np
 import mujoco
 from scipy.integrate import solve_ivp
@@ -404,8 +405,6 @@ if __name__ == "__main__":
         test_graph_for_multi_link,
     ]
 
-    # Run visual test separately — no pass/fail, just opens a window.
-    run_visual = "--visual" in sys.argv
     passed = 0
     failed = 0
     for test_fn in all_tests:

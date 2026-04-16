@@ -19,6 +19,8 @@ Node feature vector:
 
   *cos(theta) is padded to 0 for the cart
 
+  The angle is the angle of the lower edge/rod for a node, to the verticle.
+
 Edge feature vector  (EDGE_FEAT_DIM = 2)
 -----------------------------------------
   Index  Field

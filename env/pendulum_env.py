@@ -24,6 +24,7 @@ Action space
 
 from __future__ import annotations
 
+import time
 import numpy as np
 import mujoco
 import gymnasium
@@ -49,6 +50,7 @@ class VariablePendulumEnv(gymnasium.Env):
         frame_skip: int = 4,
         max_episode_steps: int = 1000,
         termination_angle: float = np.pi / 4,
+        min_episode_steps: int = 50,
         angle_noise: float = 0.05,
         vel_noise: float = 0.01,
         render_mode: str | None = None,
@@ -65,6 +67,7 @@ class VariablePendulumEnv(gymnasium.Env):
         self.frame_skip = frame_skip
         self.max_episode_steps = max_episode_steps
         self.termination_angle = termination_angle
+        self.min_episode_steps = min_episode_steps
         self.angle_noise = angle_noise
         self.vel_noise = vel_noise
         self.render_mode = render_mode
@@ -78,6 +81,7 @@ class VariablePendulumEnv(gymnasium.Env):
         self._mj_data: mujoco.MjData | None = None
         self._config: PendulumConfig | None = None
         self._step_count: int = 0
+        self._viewer = None   # passive viewer, opened lazily on first render()
 
         self.action_space = spaces.Box(
             low=np.array([-max_force], dtype=np.float32),
@@ -90,6 +94,7 @@ class VariablePendulumEnv(gymnasium.Env):
                 low=-np.inf, high=np.inf,
                 shape=(self._max_nodes, NODE_FEAT_DIM), dtype=np.float32,
             ),
+            #index of node order/topology for GNN to know
             "edge_index": spaces.Box(
                 low=0, high=self._max_nodes - 1,
                 shape=(2, self._max_edges), dtype=np.int64,
@@ -98,13 +103,12 @@ class VariablePendulumEnv(gymnasium.Env):
                 low=0.0, high=np.inf,
                 shape=(self._max_edges, EDGE_FEAT_DIM), dtype=np.float32,
             ),
+            #we pad to set max, below are lengths of actual inputs so we take out paddings right before
             "n_nodes": spaces.Box(low=2, high=self._max_nodes, shape=(1,), dtype=np.int64),
             "n_edges": spaces.Box(low=2, high=self._max_edges, shape=(1,), dtype=np.int64),
         })
 
-    # ------------------------------------------------------------------
     # Core Gymnasium interface
-    # ------------------------------------------------------------------
 
     def reset(self, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
@@ -139,10 +143,25 @@ class VariablePendulumEnv(gymnasium.Env):
         return obs, reward, terminated, truncated, info
 
     def render(self):
-        # Rendering support can be added here using mujoco.Renderer.
-        raise NotImplementedError("Rendering not yet implemented.")
+        """
+        Open (or sync) a real-time passive viewer window.
+        Call once per env step to watch the simulation at interactive speed.
+        The window stays open until close() is called or the user shuts it.
+        """
+        import mujoco.viewer as mjviewer  # lazy import — only needed when rendering
+
+        if self._mj_model is None:
+            raise RuntimeError("Call reset() before render().")
+
+        if self._viewer is None:
+            self._viewer = mjviewer.launch_passive(self._mj_model, self._mj_data)
+
+        self._viewer.sync()
 
     def close(self):
+        if self._viewer is not None:
+            self._viewer.close()
+            self._viewer = None
         self._mj_model = None
         self._mj_data = None
 
@@ -218,6 +237,8 @@ class VariablePendulumEnv(gymnasium.Env):
         }
 
     def _is_terminated(self, joint_angles: np.ndarray, cart_pos: float) -> bool:
+        if self._step_count < self.min_episode_steps:
+            return False
         angle_fail = np.any(np.abs(joint_angles) > self.termination_angle)
         rail_fail = np.abs(cart_pos) >= self.rail_limit
         return bool(angle_fail or rail_fail)
