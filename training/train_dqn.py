@@ -203,6 +203,8 @@ def train(cfg, policy_name: str):
     save_interval   = dqn_cfg["save_interval"]
 
     os.makedirs("checkpoints", exist_ok=True)
+    best_mean_reward = -np.inf
+    best_model_path  = f"checkpoints/{policy_name}_dqn_best.pt"
 
     max_ep_steps = env_cfg["max_episode_steps"]
     obs, _       = env.reset()
@@ -274,15 +276,15 @@ def train(cfg, policy_name: str):
             log_mean_length.append(mean_len)
             log_survival.append(survival_pct)
 
+            # save only when mean reward improves
+            if mean_r > best_mean_reward and len(ep_rewards) >= 20:
+                best_mean_reward = mean_r
+                torch.save(policy.state_dict(), best_model_path)
+                print(f"  *** new best reward {mean_r:.2f} → saved {best_model_path}")
+
             print(f"step {step:>7} | eps {epsilon:.3f} | episodes {ep_count:>5} "
                   f"| reward {mean_r:>7.2f} | ep_len {mean_len:>6.1f} "
                   f"| survival {survival_pct:>5.1f}% | {elapsed:.0f}s")
-
-        # checkpoint
-        if step % save_interval == 0:
-            path = f"checkpoints/{policy_name}_dqn_step{step}.pt"
-            torch.save(policy.state_dict(), path)
-            print(f"  saved {path}")
 
     env.close()
     print("Training complete.")
