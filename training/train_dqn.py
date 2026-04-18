@@ -12,6 +12,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import yaml
+import matplotlib.pyplot as plt
 
 from env.pendulum_env import VariablePendulumEnv
 from models.gnn_dqn import GNNDQNPolicy
@@ -185,6 +186,7 @@ def train(cfg, policy_name: str):
     target.eval()
 
     optimizer = torch.optim.Adam(policy.parameters(), lr=dqn_cfg["lr"])
+    # weight_decay=dqn_cfg.get("weight_decay", 1e-4)  # L2 reg — disabled for now
     buffer    = ReplayBuffer(dqn_cfg["replay_capacity"], max_nodes, max_edges)
 
     # --- bookkeeping ---
@@ -202,10 +204,21 @@ def train(cfg, policy_name: str):
 
     os.makedirs("checkpoints", exist_ok=True)
 
+    max_ep_steps = env_cfg["max_episode_steps"]
     obs, _       = env.reset()
     ep_reward    = 0.0
+    ep_length    = 0
     ep_count     = 0
-    ep_rewards   = []
+    ep_rewards   = []   # reward per episode
+    ep_lengths   = []   # steps per episode
+    ep_wins      = []   # 1 if survived max_episode_steps, else 0
+
+    # logged every log_interval steps for smooth curves
+    log_steps        = []
+    log_mean_reward  = []
+    log_mean_length  = []
+    log_survival     = []
+
     t_start      = time.time()
 
     for step in range(1, total_steps + 1):
@@ -220,13 +233,17 @@ def train(cfg, policy_name: str):
 
         buffer.push(obs, action_idx, reward, next_obs, done)
         ep_reward += reward
+        ep_length += 1
         obs        = next_obs
 
         if done:
             obs, _  = env.reset()
             ep_count += 1
             ep_rewards.append(ep_reward)
+            ep_lengths.append(ep_length)
+            ep_wins.append(1 if ep_length >= max_ep_steps else 0)  # survived = win
             ep_reward = 0.0
+            ep_length = 0
 
         # gradient update
         if step >= warmup and step % update_freq == 0 and buffer.size >= batch_size:
@@ -246,10 +263,20 @@ def train(cfg, policy_name: str):
 
         # logging
         if step % log_interval == 0:
-            mean_r = np.mean(ep_rewards[-20:]) if ep_rewards else 0.0
-            elapsed = time.time() - t_start
+            window       = 20
+            mean_r       = np.mean(ep_rewards[-window:])  if ep_rewards  else 0.0
+            mean_len     = np.mean(ep_lengths[-window:])  if ep_lengths  else 0.0
+            survival_pct = np.mean(ep_wins[-window:]) * 100 if ep_wins   else 0.0
+            elapsed      = time.time() - t_start
+
+            log_steps.append(step)
+            log_mean_reward.append(mean_r)
+            log_mean_length.append(mean_len)
+            log_survival.append(survival_pct)
+
             print(f"step {step:>7} | eps {epsilon:.3f} | episodes {ep_count:>5} "
-                  f"| mean_reward(last20) {mean_r:>7.2f} | {elapsed:.0f}s")
+                  f"| reward {mean_r:>7.2f} | ep_len {mean_len:>6.1f} "
+                  f"| survival {survival_pct:>5.1f}% | {elapsed:.0f}s")
 
         # checkpoint
         if step % save_interval == 0:
@@ -259,6 +286,33 @@ def train(cfg, policy_name: str):
 
     env.close()
     print("Training complete.")
+    _plot_training(log_steps, log_mean_reward, log_mean_length, log_survival, policy_name)
+
+
+def _plot_training(steps, rewards, lengths, survival, policy_name):
+    fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+    fig.suptitle(f"DQN Training — {policy_name.upper()} policy")
+
+    axes[0].plot(steps, rewards, color="steelblue")
+    axes[0].set_ylabel("Mean Reward (last 20 eps)")
+    axes[0].grid(alpha=0.3)
+
+    axes[1].plot(steps, lengths, color="seagreen")
+    axes[1].set_ylabel("Mean Episode Length (steps)")
+    axes[1].grid(alpha=0.3)
+
+    axes[2].plot(steps, survival, color="tomato")
+    axes[2].set_ylabel("Survival Rate % (last 20 eps)")
+    axes[2].set_xlabel("Training Steps")
+    axes[2].set_ylim(0, 105)
+    axes[2].grid(alpha=0.3)
+
+    plt.tight_layout()
+    os.makedirs("checkpoints", exist_ok=True)
+    path = f"checkpoints/{policy_name}_dqn_training_curve.png"
+    plt.savefig(path, dpi=150)
+    print(f"  plot saved → {path}")
+    plt.show()
 
 
 # Entry point

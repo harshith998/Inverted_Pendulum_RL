@@ -1,5 +1,5 @@
 environment:
-  n_links_range: [2, 4]         # min and max number of pendulum links per episode
+  n_links_range: [2, 2]         # fixed 2-link for initial training
   cart_mass_range: [0.5, 3.0]   # kg
   link_length_range: [0.3, 1.2] # metres
   link_mass_range: [0.1, 2.0]   # kg
@@ -38,6 +38,8 @@ dqn:
   warmup_steps: 1000       # steps before any gradient updates
   update_freq: 4           # env steps between gradient updates
   target_update_freq: 1000 # steps between target network syncs
+  weight_decay: 0.0001  # L2 regularization on all weights
+  dropout: 0.1          # applied inside GNN message passing layers
   total_steps: 500000
   log_interval: 1000
   save_interval: 50000

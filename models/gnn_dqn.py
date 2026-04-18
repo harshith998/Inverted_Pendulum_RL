@@ -37,18 +37,19 @@ EDGE_FEAT_DIM = 2
 class MessagePassingLayer(nn.Module):
     #One round of: gather src embeddings → compute messages → aggregate at dst → update nodes.
 
-    def __init__(self, hidden: int):
+    def __init__(self, hidden: int, dropout: float = 0.1):
         super().__init__()
-        # message from (src_node, edge) → message vector
         self.msg_fn = nn.Sequential(
             nn.Linear(hidden + hidden, hidden),
             nn.ReLU(),
+            # nn.Dropout(dropout),
         )
-        # update node from (old_embedding, aggregated_messages)
         self.update_fn = nn.Sequential(
             nn.Linear(hidden + hidden, hidden),
             nn.ReLU(),
+            # nn.Dropout(dropout),
         )
+        # self.norm = nn.LayerNorm(hidden)
 
     def forward(self, h, e_embed, edge_index, n_edges):
         # h:          (B, max_nodes, hidden)
@@ -80,19 +81,19 @@ class MessagePassingLayer(nn.Module):
         counts.scatter_add_(1, dst_idx.unsqueeze(-1), edge_mask.unsqueeze(-1).float())
         agg = agg / counts.clamp(min=1.0)
 
-        # update node embeddings
         h_new = self.update_fn(torch.cat([h, agg], dim=-1))
+        # return self.norm(h_new)
         return h_new
 
 
 class GNNEncoder(nn.Module):
     #Graph MPNN encoder: embed → message pass → global pool → embedding.
 
-    def __init__(self, hidden: int, n_layers: int):
+    def __init__(self, hidden: int, n_layers: int, dropout: float = 0.1):
         super().__init__()
         self.node_embed = nn.Linear(NODE_FEAT_DIM, hidden)
         self.edge_embed = nn.Linear(EDGE_FEAT_DIM, hidden)
-        self.mp_layers = nn.ModuleList([MessagePassingLayer(hidden) for _ in range(n_layers)])
+        self.mp_layers  = nn.ModuleList([MessagePassingLayer(hidden, dropout) for _ in range(n_layers)])
 
     def forward(self, obs: dict) -> torch.Tensor:
         node_features = obs["node_features"].float()   # (B, max_nodes, 8)
@@ -120,9 +121,10 @@ class GNNEncoder(nn.Module):
 class GNNDQNPolicy(BaseDQNPolicy):
     #GNN encoder + Q-head. Auxiliary head predicts rod [length, mass] pairs for richer training signal.
 
-    def __init__(self, n_action_bins: int, hidden: int = 64, n_mp_layers: int = 2, max_links: int = 4):
+    def __init__(self, n_action_bins: int, hidden: int = 64, n_mp_layers: int = 2,
+                 max_links: int = 4, dropout: float = 0.1):
         super().__init__(n_action_bins)
-        self.encoder  = GNNEncoder(hidden, n_mp_layers)
+        self.encoder  = GNNEncoder(hidden, n_mp_layers, dropout)
         self.q_head   = nn.Linear(hidden, n_action_bins)
         # auxiliary: predict [length, mass] for every rod (max_links rods)
         self.aux_head = nn.Linear(hidden, max_links * 2)
