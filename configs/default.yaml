@@ -24,6 +24,26 @@ init:
   angle_noise: 0.05      # radians, uniform noise applied to each joint angle at reset
   vel_noise: 0.01        # rad/s or m/s, uniform noise applied to each velocity at reset
 
+ppo:
+  hidden_dim: 128
+  n_layers: 3            # message-passing layers (MPNN) or attention layers (transformer)
+  n_heads: 4             # attention heads — transformer only
+  dropout: 0.1
+  rollout_steps: 2048    # env steps collected before each update
+  n_epochs: 5            # reduced from 10 — fewer epochs keeps ratio fresh, less drift
+  mini_batch_size: 64
+  gamma: 0.99
+  gae_lambda: 0.95       # GAE smoothing (1.0 = full MC return, 0.0 = pure TD)
+  clip_epsilon: 0.2      # PPO surrogate clip range
+  value_coef: 0.5        # weight on value loss
+  entropy_coef: 0.02     # increased from 0.01 — keeps std from collapsing post-peak
+  lr: 0.0001             # reduced from 3e-4 — slower but much more stable
+  anneal_lr: true        # linearly decay lr → 0 over total_steps
+  max_grad_norm: 0.5
+  total_steps: 2000000   # doubled — slower lr needs more steps to converge
+  log_interval: 2048     # log every rollout
+  save_interval: 100000
+
 dqn:
   n_action_bins: 51        # discrete bins over [-max_force, max_force]
   hidden_dim: 64           # GNN and MLP hidden size
