@@ -51,15 +51,15 @@ dqn:
   replay_capacity: 100000
   batch_size: 64
   gamma: 0.99              # discount factor
-  lr: 0.0001
+  lr: 0.00005              # reduced from 1e-4 — slower but avoids Q-value divergence
   eps_start: 1.0           # epsilon-greedy start
   eps_end: 0.05            # epsilon-greedy floor
-  eps_decay_steps: 50000   # steps to decay epsilon from start to end
+  eps_decay_steps: 150000  # increased from 50k — keeps exploration alive longer
   warmup_steps: 1000       # steps before any gradient updates
   update_freq: 4           # env steps between gradient updates
   target_update_freq: 1000 # steps between target network syncs
-  weight_decay: 0.0001  # L2 regularization on all weights
-  dropout: 0.1          # applied inside GNN message passing layers
-  total_steps: 500000
+  weight_decay: 0.0001     # L2 regularization on all weights (now active)
+  dropout: 0.1             # applied inside GNN message passing layers (now active)
+  total_steps: 2000000     # increased from 500k — slower lr needs more steps
   log_interval: 1000
-  save_interval: 50000
+  save_interval: 100000

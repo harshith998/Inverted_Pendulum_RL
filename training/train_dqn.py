@@ -118,10 +118,11 @@ def compute_td_loss(policy, target, obs, actions, rewards, next_obs, dones, gamm
 
     td_loss = F.smooth_l1_loss(q_taken, target_q)
 
-    # auxiliary param prediction (GNN only — MLP has no aux_head)
+    # auxiliary param prediction (GNN only — MLP has no forward() returning aux)
+    # Use policy.forward() so encoder runs once for both Q and aux (not twice).
     aux_loss = torch.tensor(0.0, device=device)
-    if hasattr(policy, "get_aux_predictions"):
-        pred = policy.get_aux_predictions(obs)           # (B, max_links * 2)
+    if hasattr(policy, "max_links") and callable(getattr(policy, "forward", None)):
+        _, pred = policy(obs)                            # (B, n_bins), (B, max_links * 2)
         # build ground-truth from edge_features: edges 0,2,4,... are forward edges → [length, mass]
         # edge_features shape (B, max_edges, 2), forward edges at even indices
         ef   = obs["edge_features"]                      # (B, max_edges, 2)
@@ -185,8 +186,8 @@ def train(cfg, policy_name: str):
     target = copy.deepcopy(policy).to(device)
     target.eval()
 
-    optimizer = torch.optim.Adam(policy.parameters(), lr=dqn_cfg["lr"])
-    # weight_decay=dqn_cfg.get("weight_decay", 1e-4)  # L2 reg — disabled for now
+    optimizer = torch.optim.Adam(policy.parameters(), lr=dqn_cfg["lr"],
+                                 weight_decay=dqn_cfg.get("weight_decay", 1e-4))
     buffer    = ReplayBuffer(dqn_cfg["replay_capacity"], max_nodes, max_edges)
 
     # --- bookkeeping ---

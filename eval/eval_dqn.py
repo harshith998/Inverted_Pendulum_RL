@@ -74,7 +74,12 @@ def load_policy(policy_name: str, checkpoint_path: str, cfg: dict,
     else:
         policy = MLPDQNPolicy(n_bins, max_links=max_links, hidden=hidden)
 
-    policy.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    state_dict = torch.load(checkpoint_path, map_location=device)
+    missing, unexpected = policy.load_state_dict(state_dict, strict=False)
+    if missing:
+        print(f"  [warn] checkpoint missing keys (new arch keys init to default): {missing}")
+    if unexpected:
+        print(f"  [warn] checkpoint has unexpected keys (ignored): {unexpected}")
     policy.to(device)
     policy.eval()
     return policy
