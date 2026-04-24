@@ -336,6 +336,7 @@ def plot_1d(values, rewards, train_lo, train_hi,
     ood_patch = mpatches.Patch(color=COLOR_OOD, label="OOD")
     ax.legend(handles=[in_patch, ood_patch], fontsize=10)
 
+    ax.set_ylim(0, 2000)
     ax.set_xlabel(f"{param_name} ({units})", fontsize=12)
     ax.set_ylabel(f"Mean Reward ({N_EVAL_EPISODES} eps)", fontsize=12)
     ax.set_title(f"OOD Generalisation — {param_name} | {policy_name.upper()} DQN",
@@ -344,7 +345,7 @@ def plot_1d(values, rewards, train_lo, train_hi,
 
     plt.tight_layout()
     slug = param_name.lower().replace(" ", "_")
-    path = os.path.join(plot_dir, f"{policy_name}_{slug}_sweep.png")
+    path = os.path.join(plot_dir, f"{policy_name}_dqn_{slug}_sweep.png")
     plt.savefig(path, dpi=150)
     print(f"  Plot saved → {path}")
     plt.close()
@@ -354,11 +355,8 @@ def plot_2d(length_vals, mass_vals, reward_grid,
             len_bounds, mass_bounds, policy_name, plot_dir):
     fig, ax = plt.subplots(figsize=(9, 7))
 
-    vmin = np.nanmin(reward_grid)
-    vmax = np.nanmax(reward_grid)
-
     im = ax.pcolormesh(length_vals, mass_vals, reward_grid,
-                       cmap=CMAP_HEATMAP, vmin=vmin, vmax=vmax, shading="auto")
+                       cmap="Greens", vmin=0, vmax=2000, shading="auto")
 
     # Training distribution rectangle
     len_lo, len_hi   = len_bounds
@@ -383,7 +381,7 @@ def plot_2d(length_vals, mass_vals, reward_grid,
     ax.legend(fontsize=9, loc="upper right")
 
     plt.tight_layout()
-    path = os.path.join(plot_dir, f"{policy_name}_ood_heatmap.png")
+    path = os.path.join(plot_dir, f"{policy_name}_dqn_ood_heatmap.png")
     plt.savefig(path, dpi=150)
     print(f"  Plot saved → {path}")
     plt.close()
@@ -436,7 +434,7 @@ def main():
 
     os.makedirs("eval/plots", exist_ok=True)
     os.makedirs("eval/cache", exist_ok=True)
-    cache_path = f"eval/cache/{args.policy}_ood_cache.npz"
+    cache_path = f"eval/cache/{args.policy}_dqn_ood_cache.npz"
     cache      = load_cache(cache_path)
     print(f"Cache      : {len(cache)} existing entries  ({cache_path})")
 

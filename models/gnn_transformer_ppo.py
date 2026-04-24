@@ -52,7 +52,7 @@ class GraphAttentionLayer(nn.Module):
         # Edge feature → scalar bias per attention head
         self.edge_bias = nn.Linear(EDGE_FEAT_DIM, n_heads, bias=False)
 
-        self.attn_drop = nn.Dropout(dropout)
+        # self.attn_drop = nn.Dropout(dropout)   # hurts stability — disabled
         self.norm1     = nn.LayerNorm(hidden)
         self.norm2     = nn.LayerNorm(hidden)
 
@@ -60,7 +60,7 @@ class GraphAttentionLayer(nn.Module):
         self.ff = nn.Sequential(
             nn.Linear(hidden, hidden * 2),
             nn.ReLU(),
-            nn.Dropout(dropout),
+            # nn.Dropout(dropout),   # hurts stability — disabled
             nn.Linear(hidden * 2, hidden),
         )
 
@@ -124,7 +124,7 @@ class GraphAttentionLayer(nn.Module):
         denom.scatter_add_(1, dst_h, logits_exp)
         denom_per_edge = denom.gather(1, dst_h)
         alpha = logits_exp / denom_per_edge.clamp(min=1e-6)
-        alpha = self.attn_drop(alpha)
+        # alpha = self.attn_drop(alpha)   # disabled
 
         # Weighted sum of values at each destination node
         # alpha: (B, E, H), V_edge: (B, E, H, D)

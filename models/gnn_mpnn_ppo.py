@@ -26,12 +26,12 @@ class MessagePassingLayer(nn.Module):
         self.msg_fn = nn.Sequential(
             nn.Linear(hidden + hidden, hidden),
             nn.ReLU(),
-            nn.Dropout(dropout),
+            # nn.Dropout(dropout),   # hurts stability — disabled
         )
         self.update_fn = nn.Sequential(
             nn.Linear(hidden + hidden, hidden),
             nn.ReLU(),
-            nn.Dropout(dropout),
+            # nn.Dropout(dropout),   # hurts stability — disabled
         )
         self.norm = nn.LayerNorm(hidden)
 
@@ -65,7 +65,7 @@ class MessagePassingLayer(nn.Module):
         agg     = agg / counts.clamp(min=1.0)
 
         h_new = self.update_fn(torch.cat([h, agg], dim=-1))
-        return self.norm(h_new)
+        return self.norm(h + h_new)   # residual connection — same fix as gnn_dqn.py
 
 
 class GNNMPNNEncoder(nn.Module):
