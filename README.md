@@ -1,6 +1,6 @@
 # GNN-RL Inverted Pendulum
 
-## What it Does
+## What it Does / Goal
 
 This project trains reinforcement learning agents to balance a variable inverted pendulum — a cart-pole system where the number of links, their lengths, and their masses all change between episodes. Rather than encoding the physical state as a flat vector (which would break when the topology changes), the system represents the pendulum as a graph: cart and joints are nodes, rods are edges carrying physical parameters (length, mass). A Graph Neural Network (GNN) encoder reads this graph and produces a fixed-size embedding regardless of how many links are present, enabling a single trained model to generalize zero-shot to pendulum configurations it has never seen — including out-of-distribution lengths and masses. Two GNN architectures are compared (message-passing MPNN and graph-attention transformer) against flat MLP baselines, under both DQN (discrete, off-policy) and PPO (continuous, on-policy) training regimes.
 
@@ -23,6 +23,7 @@ Separately, Wang et al. (2018) introduced **NerveNet**, which applied Graph Neur
 ---
 
 ## Quick Start
+more detailed start in setup.md
 
 ```bash
 # 1. Clone and set up environment
