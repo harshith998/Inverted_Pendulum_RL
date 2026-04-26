@@ -139,6 +139,10 @@ class VariablePendulumEnv(gymnasium.Env):
         terminated = self._is_terminated(joint_angles, cart_pos)
         truncated = self._step_count >= self.max_episode_steps
 
+        if truncated:
+            reward += 2.0
+            reward_info["win_bonus"] = 2.0
+
         info = {"reward_components": reward_info}
         return obs, reward, terminated, truncated, info
 

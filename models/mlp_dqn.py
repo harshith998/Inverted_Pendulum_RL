@@ -11,7 +11,8 @@ EDGE_FEAT_DIM = 2
 class MLPDQNPolicy(BaseDQNPolicy):
     #Flat MLP: concatenate padded node + edge features → hidden layers → Q-values."""
 
-    def __init__(self, n_action_bins: int, max_links: int = 4, hidden: int = 64):
+    def __init__(self, n_action_bins: int, max_links: int = 4, hidden: int = 64,
+                 dropout: float = 0.1):
         super().__init__(n_action_bins)
 
         max_nodes = max_links + 1
@@ -21,8 +22,10 @@ class MLPDQNPolicy(BaseDQNPolicy):
         self.net = nn.Sequential(
             nn.Linear(flat_dim, hidden * 4),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden * 4, hidden * 2),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden * 2, hidden),
             nn.ReLU(),
             nn.Linear(hidden, n_action_bins), #output is number of action discrete vals

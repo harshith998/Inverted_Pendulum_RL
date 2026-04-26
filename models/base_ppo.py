@@ -1,9 +1,5 @@
 """Abstract base for all PPO actor-critic policies.
 
-Subclasses implement encode(obs) -> embedding tensor.
-This base handles the shared actor/critic heads, action sampling,
-log-prob computation (with tanh correction), and value estimation.
-
 Action parameterisation
 -----------------------
 Raw mean from actor MLP → tanh → scale by max_force.
