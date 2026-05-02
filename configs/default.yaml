@@ -47,6 +47,10 @@ ppo:
     n_heads: 2           # 4→2: each head sees 64-dim keys/queries (was 32), more capacity
     n_layers: 2          # 3→2: shallower = less gradient vanishing, faster convergence
     entropy_coef: 0.03   # slightly higher — transformer std tends to collapse faster
+  hgfn:                  # Hamiltonian Graph Flow Network overrides
+    n_icga_layers: 2     # ICGA attention layers (after the RIM bidirectional pass)
+    n_heads: 2           # attention heads per ICGA layer
+    entropy_coef: 0.03   # match transformer — physics attention can collapse std similarly
 
 dqn:
   n_action_bins: 51        # discrete bins over [-max_force, max_force]
