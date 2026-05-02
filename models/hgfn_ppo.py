@@ -54,17 +54,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 from models.base_ppo import BasePPOPolicy
 
-NODE_FEAT_DIM = 8
+NODE_FEAT_DIM = 9
 EDGE_FEAT_DIM = 2
 
 # ── Denormalisation constants (must match graph/graph_builder.py) ──────────────
-_LEN_MIN    = 0.3;  _LEN_RANGE  = 0.9   # L = norm * 0.9 + 0.3
-_MASS_MIN   = 0.1;  _MASS_RANGE = 1.9   # m = norm * 1.9 + 0.1
-_CART_VEL   = 5.0                        # ẋ normalisation
-_ANG_VEL    = 10.0                       # θ̇  normalisation
-_G          = 9.81                       # gravitational acceleration
-_M_CART_EST = 1.75                       # avg of [0.5, 3.0]; not observable
-_H_SCALE    = 20.0                       # rough energy normalisation constant
+_LEN_MIN         = 0.3;  _LEN_RANGE       = 0.9   # L = norm * 0.9 + 0.3
+_MASS_MIN        = 0.1;  _MASS_RANGE      = 1.9   # m = norm * 1.9 + 0.1
+_CART_MASS_MIN   = 0.5;  _CART_MASS_RANGE = 2.5   # m_c = norm * 2.5 + 0.5
+_CART_VEL        = 5.0                             # ẋ normalisation
+_ANG_VEL         = 10.0                            # θ̇  normalisation
+_G               = 9.81                            # gravitational acceleration
+_H_SCALE         = 20.0                            # rough energy normalisation constant
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -81,7 +81,7 @@ def _rod_tensors(obs: dict):
     L, m, sin_th, cos_th, theta_dot : each (B, max_links)
     rod_valid                        : (B, max_links) bool
     """
-    node_feats = obs["node_features"].float()   # (B, max_nodes, 8)
+    node_feats = obs["node_features"].float()   # (B, max_nodes, 9)
     edge_feats = obs["edge_features"].float()   # (B, max_edges, 2)
     n_nodes    = obs["n_nodes"].long()           # (B, 1)
 
@@ -130,6 +130,10 @@ def compute_inertia_coupling(obs: dict) -> torch.Tensor:
     max_nodes = max_links + 1
     device    = L.device
 
+    # Exact cart mass from node feature 8 (observed, no longer estimated)
+    node_feats = obs["node_features"].float()
+    m_cart = node_feats[:, 0, 8] * _CART_MASS_RANGE + _CART_MASS_MIN  # (B,)
+
     # Distal mass sums: distal[:, j] = Σₖ≥ⱼ m[:,k]
     distal     = torch.flip(torch.cumsum(torch.flip(m, [1]), 1), [1])  # (B, max_links)
     distal_excl = distal - m                                            # Σₖ>ⱼ mₖ
@@ -137,7 +141,7 @@ def compute_inertia_coupling(obs: dict) -> torch.Tensor:
     M = torch.zeros(B, max_nodes, max_nodes, device=device)
 
     # M[0,0]
-    M[:, 0, 0] = _M_CART_EST + m.sum(dim=1)
+    M[:, 0, 0] = m_cart + m.sum(dim=1)
 
     # M[0,j] = M[j,0]
     M_0j = L * cos_th * (distal - m / 2) * rod_valid.float()   # (B, max_links)
@@ -171,7 +175,7 @@ def compute_hamiltonian(obs: dict) -> torch.Tensor:
 
     WHY only V_pot, not T + V:
       Kinetic energy T requires cart mass, which is unobservable.  Using a
-      fixed estimate (_M_CART_EST) introduces systematic errors of up to ±50%
+      fixed estimate would introduce systematic errors of up to ±50%
       during training (cart mass ~ Uniform[0.5, 3.0]).  Worse, high T often
       means the pendulum is moving fast — which is correlated with *bad* states
       (recovering from, or in the process of, falling) just as much as good
@@ -439,7 +443,7 @@ class HGFNEncoder(nn.Module):
 
     def forward(self, obs: dict, M_tilde: torch.Tensor) -> torch.Tensor:
         """Returns global graph embedding of shape (B, hidden)."""
-        node_features = obs["node_features"].float()   # (B, max_nodes, 8)
+        node_features = obs["node_features"].float()   # (B, max_nodes, 9)
         edge_index    = obs["edge_index"].long()        # (B, 2, max_edges)
         edge_features = obs["edge_features"].float()   # (B, max_edges, 2)
         n_nodes       = obs["n_nodes"].long()           # (B, 1)

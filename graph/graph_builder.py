@@ -16,8 +16,10 @@ Node feature vector:
   5      theta vel.    0           θ̇ᵢ          θ̇ₙ
   6      x_cart        x           0           0
   7      xvel.         ẋ           0           0
+  8      cart_mass     m_c (norm)  0           0
 
   *cos(theta) is padded to 0 for the cart
+  cart_mass normalised as (m_c - 0.5) / 2.5 so [0.5, 3.0] → [0, 1]
 
   The angle is the angle of the lower edge/rod for a node, to the verticle.
 
@@ -39,7 +41,7 @@ import numpy as np
 
 from env.mujoco_builder import PendulumConfig
 
-NODE_FEAT_DIM: int = 8
+NODE_FEAT_DIM: int = 9
 EDGE_FEAT_DIM: int = 2
 
 
@@ -60,11 +62,13 @@ class PendulumGraph:
 
 
 # Normalization constants — all features land in roughly [-1, 1]
-_RAIL_LIMIT   = 2.5    # cart position range
-_CART_VEL_MAX = 5.0    # m/s reasonable max
-_ANG_VEL_MAX  = 10.0   # rad/s reasonable max
+_RAIL_LIMIT        = 2.5    # cart position range
+_CART_VEL_MAX      = 5.0    # m/s reasonable max
+_ANG_VEL_MAX       = 10.0   # rad/s reasonable max
 _LEN_MIN, _LEN_MAX = 0.3, 1.2
 _MASS_MIN, _MASS_MAX = 0.1, 2.0
+_CART_MASS_MIN     = 0.5    # kg, lower bound of cart_mass_range
+_CART_MASS_RANGE   = 2.5    # kg, range of cart_mass_range [0.5, 3.0]
 
 
 def build_graph(
@@ -87,6 +91,7 @@ def build_graph(
     node_features[0, 0] = 1.0
     node_features[0, 6] = cart_pos / _RAIL_LIMIT
     node_features[0, 7] = cart_vel / _CART_VEL_MAX
+    node_features[0, 8] = (config.cart_mass - _CART_MASS_MIN) / _CART_MASS_RANGE
 
     # joint/endpoint nodes — sin/cos already [-1,1]; normalize angular velocity
     for i in range(n):

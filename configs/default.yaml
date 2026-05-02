@@ -11,7 +11,7 @@ environment:
   termination_angle: 0.7854     # radians (~45 degrees), episode ends if any joint exceeds this
 
 graph:
-  node_feat_dim: 8   # [is_cart, is_joint, is_end, sin_theta, cos_theta, theta_dot, x, xdot]
+  node_feat_dim: 9   # [is_cart, is_joint, is_end, sin_theta, cos_theta, theta_dot, x, xdot, cart_mass]
   edge_feat_dim: 2   # [length, mass]
 
 rewards:

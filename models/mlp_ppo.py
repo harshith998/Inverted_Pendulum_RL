@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 from models.base_ppo import BasePPOPolicy
 
-NODE_FEAT_DIM = 8
+NODE_FEAT_DIM = 9
 EDGE_FEAT_DIM = 2
 
 

@@ -67,7 +67,7 @@ class RolloutBuffer:
         self.gae_lambda    = gae_lambda
 
         T, N = rollout_steps, n_envs
-        self.node_feat  = np.zeros((T, N, max_nodes, 8),  dtype=np.float32)
+        self.node_feat  = np.zeros((T, N, max_nodes, 9),  dtype=np.float32)
         self.edge_index = np.zeros((T, N, 2, max_edges),  dtype=np.int64)
         self.edge_feat  = np.zeros((T, N, max_edges, 2),  dtype=np.float32)
         self.n_nodes    = np.zeros((T, N, 1),              dtype=np.int64)

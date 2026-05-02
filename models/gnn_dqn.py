@@ -29,7 +29,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from models.base_dqn import BaseDQNPolicy
 
-NODE_FEAT_DIM = 8
+NODE_FEAT_DIM = 9
 EDGE_FEAT_DIM = 2
 
 
@@ -96,7 +96,7 @@ class GNNEncoder(nn.Module):
         )
 
     def forward(self, obs: dict) -> torch.Tensor:
-        node_features = obs["node_features"].float()   # (B, max_nodes, 8)
+        node_features = obs["node_features"].float()   # (B, max_nodes, 9)
         edge_index    = obs["edge_index"].long()        # (B, 2, max_edges)
         edge_features = obs["edge_features"].float()   # (B, max_edges, 2)
         n_nodes       = obs["n_nodes"].long()           # (B, 1)
