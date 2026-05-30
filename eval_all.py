@@ -8,7 +8,8 @@ Usage
   python3.12 eval_all.py --config configs/default.yaml
   python3.12 eval_all.py --skip dqn_mlp cgat_perc
   python3.12 eval_all.py --only ppo_gnn_mpnn cgat_base
-  python3.12 eval_all.py --tests 1 2
+  python3.12 eval_all.py --seeds 0 1 2
+  python3.12 eval_all.py --tests 1 2 2.5 3
 
 Jobs (in order)
 ---------------
@@ -78,7 +79,7 @@ def _should_echo(line: str) -> bool:
     if not stripped:
         return False
     prefixes = (
-        "Device", "Policy", "Checkpoint", "Config", "Tests", "Episodes/pt",
+        "Device", "Policy", "Checkpoint", "Config", "Tests", "Seed", "Episodes/pt",
         "Inference timing", "Total", "Per call", "Learned physics",
         "Plot saved", "Compare plot saved", "Done",
     )
@@ -93,18 +94,19 @@ def _should_echo(line: str) -> bool:
     return False
 
 
-def _build_cmd(job: dict, args) -> list[str] | None:
+def _build_cmd(job: dict, args, seed: int) -> list[str] | None:
     cmd = job["cmd"] + ["--config", args.config]
     tests = list(args.tests)
     if job["name"].startswith("dqn_"):
-        tests = [t for t in tests if t != 4]
+        tests = [t for t in tests if t != "4"]
         if not tests:
             return None
     if job["name"] == "lqr_oracle":
-        tests = [t for t in tests if t in (1, 2, 3)]
+        tests = [t for t in tests if t in ("1", "2", "2.5", "3")]
         if not tests:
             return None
     cmd += ["--tests"] + [str(t) for t in tests]
+    cmd += ["--seed", str(seed)]
     if args.n_eval_episodes is not None:
         cmd += ["--n_eval_episodes", str(args.n_eval_episodes)]
     if args.n_sweep_points is not None:
@@ -121,9 +123,9 @@ def _build_cmd(job: dict, args) -> list[str] | None:
     return cmd
 
 
-def run_job(job: dict, args, job_idx: int, n_jobs: int) -> bool:
+def run_job(job: dict, args, seed: int, job_idx: int, n_jobs: int) -> bool:
     name = job["name"]
-    cmd = _build_cmd(job, args)
+    cmd = _build_cmd(job, args, seed)
     if cmd is None:
         _print_header(f"[{job_idx}/{n_jobs}]  {name}")
         if name == "lqr_oracle":
@@ -132,10 +134,10 @@ def run_job(job: dict, args, job_idx: int, n_jobs: int) -> bool:
             print("  Skipped: Test 4 is not implemented for DQN eval.")
         return True
 
-    _print_header(f"[{job_idx}/{n_jobs}]  {name}")
+    _print_header(f"[{job_idx}/{n_jobs}]  {name}  seed={seed}")
     print(f"  Command : {' '.join(cmd)}")
 
-    log_path = os.path.join(args.log_dir, f"{name}.log")
+    log_path = os.path.join(args.log_dir, f"{name}_seed{seed}.log")
     print(f"  Log     : {log_path}\n")
 
     if args.dry_run:
@@ -176,9 +178,10 @@ def main():
         help="Job names to skip")
     parser.add_argument("--only", nargs="*", default=None, metavar="JOB",
         help="Run only these jobs (overrides --skip)")
-    parser.add_argument("--tests", nargs="+", type=int, choices=[1, 2, 3, 4],
-        default=[1, 2, 3, 4],
-        help="Eval stages to run: 1=length, 2=mass, 3=heatmap, 4=few-shot")
+    parser.add_argument("--tests", nargs="+",
+        choices=["1", "2", "2.5", "3", "4"],
+        default=["1", "2", "2.5", "3", "4"],
+        help="Eval stages: 1=length, 2=mass, 2.5=topology, 3=topology heatmaps, 4=few-shot")
     parser.add_argument("--n_eval_episodes", type=int, default=None,
         help="Override episodes per eval point")
     parser.add_argument("--n_sweep_points", type=int, default=None,
@@ -198,8 +201,12 @@ def main():
         help="Learning rate for Test 4 adaptation")
     parser.add_argument("--log_dir", default="logs/eval",
         help="Directory for per-job eval logs")
+    parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2],
+        help="Seeds to evaluate. Default: 0 1 2")
     parser.add_argument("--dry-run", action="store_true",
         help="Print commands without running them")
+    parser.add_argument("--no_aggregate", action="store_true",
+        help="Do not aggregate seed result files after successful eval")
     args = parser.parse_args()
 
     if not os.path.exists(args.config):
@@ -222,9 +229,12 @@ def main():
     if not jobs:
         sys.exit("No jobs to run after filtering.")
 
-    print(f"\neval_all  |  {len(jobs)}/{len(JOBS)} jobs")
+    expanded_jobs = [(job, seed) for seed in args.seeds for job in jobs]
+
+    print(f"\neval_all  |  {len(expanded_jobs)}/{len(JOBS) * len(args.seeds)} runs")
     print(f"Config    : {args.config}")
     print(f"Tests     : {args.tests}")
+    print(f"Seeds     : {args.seeds}")
     eval_size = []
     eval_size.append(
         f"{args.n_sweep_points} sweep pts"
@@ -243,14 +253,14 @@ def main():
     if args.dry_run:
         print("Mode      : dry run")
     print("\nJobs to run:")
-    for j in jobs:
-        print(f"  - {j['name']}")
+    for j, seed in expanded_jobs:
+        print(f"  - {j['name']}  seed={seed}")
 
     results = {}
     t_all = time.time()
-    for i, job in enumerate(jobs, 1):
-        ok = run_job(job, args, i, len(jobs))
-        results[job["name"]] = ok
+    for i, (job, seed) in enumerate(expanded_jobs, 1):
+        ok = run_job(job, args, seed, i, len(expanded_jobs))
+        results[f"{job['name']}_seed{seed}"] = ok
 
     total_elapsed = time.time() - t_all
     _print_header(f"Summary  ({total_elapsed / 60:.1f} min total)")
@@ -263,6 +273,10 @@ def main():
         print(f"\n  {len(failed)} job(s) failed: {failed}")
         sys.exit(1)
     print(f"\n  All {len(results)} eval job(s) completed successfully.")
+
+    if not args.dry_run and not args.no_aggregate and len(args.seeds) > 1:
+        from eval.aggregate_seeds import aggregate_results
+        aggregate_results("eval/results", args.seeds)
 
 
 if __name__ == "__main__":

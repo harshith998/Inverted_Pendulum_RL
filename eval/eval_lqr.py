@@ -1,7 +1,7 @@
 # Run: python3.12 eval/eval_lqr.py
 
 """
-LQR Oracle evaluation — all 3 tests matching eval_ppo.py structure.
+LQR Oracle evaluation matching eval_ppo.py structure for Tests 1, 2, 2.5, and 3.
 
 For in-distribution cells, K is recomputed from the exact physical parameters
 (optimal, non-generalizable). For OOD cells, K is computed from the nearest
@@ -12,7 +12,8 @@ Tests
 -----
   1. 1D sweep — link_length
   2. 1D sweep — link_mass
-  3. 2D heatmap — link_length × link_mass  (same OOD range as eval_ppo.py)
+  2.5 Topology sweep — n_links
+  3. Topology heatmaps — link_length × link_mass per n_links
 
 Also prints overall win rate across all evaluated episodes.
 """
@@ -29,6 +30,13 @@ import matplotlib.patches as mpatches
 import yaml
 
 from env.pendulum_env import VariablePendulumEnv
+from eval.topology import (
+    plot_topology_heatmaps,
+    plot_topology_sweep,
+    seed_suffix,
+    topology_tag,
+    topology_values,
+)
 
 
 # ── Constants (must match graph/graph_builder.py) ─────────────────────────────
@@ -111,9 +119,10 @@ def compute_lqr_gain(lengths, masses, cart_mass, n_links):
 
 
 # ── For OOD: clamp to nearest in-distribution config ─────────────────────────
-def lqr_gain_for_eval(length, mass, cfg):
+def lqr_gain_for_eval(length, mass, cfg, n_links: int | None = None):
     env_cfg   = cfg["environment"]
-    n_links   = env_cfg["n_links_range"][0]
+    if n_links is None:
+        n_links = env_cfg["n_links_range"][0]
     len_lo, len_hi   = env_cfg["link_length_range"]
     mass_lo, mass_hi = env_cfg["link_mass_range"]
     cart_lo, cart_hi = env_cfg["cart_mass_range"]
@@ -158,9 +167,10 @@ def run_episode(env, K, n_links, max_force, max_steps):
 
 
 # ── Env factory ───────────────────────────────────────────────────────────────
-def make_fixed_env(cfg, link_length, link_mass):
+def make_fixed_env(cfg, link_length, link_mass, n_links: int | None = None):
     env_cfg   = cfg["environment"]
-    n_links   = env_cfg["n_links_range"][0]
+    if n_links is None:
+        n_links = env_cfg["n_links_range"][0]
     lo, hi    = env_cfg["cart_mass_range"]
     cart_mass = (lo + hi) / 2.0
     return VariablePendulumEnv(
@@ -174,18 +184,20 @@ def make_fixed_env(cfg, link_length, link_mass):
         frame_skip        = env_cfg["frame_skip"],
         max_episode_steps = env_cfg["max_episode_steps"],
         termination_angle = env_cfg["termination_angle"],
+        max_links         = env_cfg.get("max_links"),
     )
 
 
 # ── Eval a single (length, mass) point ───────────────────────────────────────
-def eval_point(cfg, length, mass, n_episodes):
+def eval_point(cfg, length, mass, n_episodes, n_links: int | None = None):
     env_cfg   = cfg["environment"]
-    n_links   = env_cfg["n_links_range"][0]
+    if n_links is None:
+        n_links = env_cfg["n_links_range"][0]
     max_force = env_cfg["max_force"]
     max_steps = env_cfg["max_episode_steps"]
 
-    K   = lqr_gain_for_eval(length, mass, cfg)
-    env = make_fixed_env(cfg, length, mass)
+    K   = lqr_gain_for_eval(length, mass, cfg, n_links=n_links)
+    env = make_fixed_env(cfg, length, mass, n_links=n_links)
     rewards, wins = [], []
     for _ in range(n_episodes):
         try:
@@ -264,16 +276,84 @@ def plot_2d(length_vals, mass_vals, reward_grid, len_bounds, mass_bounds,
     print(f"  Plot saved → {path}")
 
 
+# ── Test helpers ─────────────────────────────────────────────────────────────
+def run_topology_sweep(cfg, n_episodes):
+    env_cfg = cfg["environment"]
+    len_mid = sum(env_cfg["link_length_range"]) / 2.0
+    mass_mid = sum(env_cfg["link_mass_range"]) / 2.0
+    train_topology = tuple(env_cfg["n_links_range"])
+    n_links_vals = topology_values(cfg)
+    rewards, wins = [], []
+
+    print(f"\n{'='*60}")
+    print("[Test 2.5] LQR Topology sweep")
+    print(f"  n_links : {n_links_vals}")
+    print(f"  Train topology : {train_topology}")
+    print(f"  Length={len_mid:.3f}m  Mass={mass_mid:.3f}kg  |  {n_episodes} eps/pt")
+    print(f"{'='*60}")
+
+    for i, n_links in enumerate(n_links_vals):
+        r, w = eval_point(cfg, len_mid, mass_mid, n_episodes, n_links=n_links)
+        rewards.append(r)
+        wins.append(w)
+        print(f"  [{i+1:3d}/{len(n_links_vals)}] n_links={n_links}  "
+              f"reward={r:8.2f}  win={w*100:.0f}%  "
+              f"[{topology_tag(n_links, train_topology)}]")
+    return np.array(n_links_vals), np.array(rewards), np.array(wins), train_topology
+
+
+def run_topology_heatmaps(cfg, n_episodes, n_grid):
+    env_cfg = cfg["environment"]
+    len_lo, len_hi = env_cfg["link_length_range"]
+    mass_lo, mass_hi = env_cfg["link_mass_range"]
+    n_links_vals = topology_values(cfg)
+
+    eval_len_lo, eval_len_hi = compute_eval_range(len_lo, len_hi)
+    eval_mass_lo, eval_mass_hi = compute_eval_range(mass_lo, mass_hi)
+    length_grid = np.linspace(eval_len_lo, eval_len_hi, n_grid)
+    mass_grid = np.linspace(eval_mass_lo, eval_mass_hi, n_grid)
+    reward_cube = np.zeros((len(n_links_vals), n_grid, n_grid))
+    win_cube = np.zeros((len(n_links_vals), n_grid, n_grid))
+    total_cells = len(n_links_vals) * n_grid * n_grid
+
+    print(f"\n{'='*60}")
+    print(f"[Test 3] LQR Topology heatmaps — {len(n_links_vals)}×{n_grid}×{n_grid} grid ({total_cells} cells)")
+    print(f"  n_links: {n_links_vals}")
+    print(f"  Length : {eval_len_lo:.3f}m → {eval_len_hi:.3f}m")
+    print(f"  Mass   : {eval_mass_lo:.3f}kg → {eval_mass_hi:.3f}kg")
+    print(f"{'='*60}")
+
+    done = 0
+    for k, n_links in enumerate(n_links_vals):
+        for i, length in enumerate(length_grid):
+            for j, mass in enumerate(mass_grid):
+                r, w = eval_point(cfg, length, mass, n_episodes, n_links=n_links)
+                reward_cube[k, j, i] = r
+                win_cube[k, j, i] = w
+                done += 1
+                if done % 20 == 0 or done == total_cells:
+                    print(f"  [{done:4d}/{total_cells}]  n_links={n_links} "
+                          f"length={length:.3f}m  mass={mass:.3f}kg  "
+                          f"reward={r:7.2f}  win={w*100:.0f}%")
+
+    return (length_grid, mass_grid, reward_cube, win_cube, np.array(n_links_vals),
+            (len_lo, len_hi), (mass_lo, mass_hi), tuple(env_cfg["n_links_range"]))
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="LQR oracle OOD evaluation.")
     parser.add_argument("--config", default="configs/default.yaml")
-    parser.add_argument("--tests", nargs="+", type=int, choices=[1, 2, 3],
-        default=[1, 2, 3])
+    parser.add_argument("--tests", nargs="+",
+        choices=["1", "2", "2.5", "3"],
+        default=["1", "2", "2.5", "3"])
     parser.add_argument("--n_eval_episodes", type=int, default=N_EPISODES)
     parser.add_argument("--n_sweep_points", type=int, default=N_SWEEP_POINTS)
     parser.add_argument("--n_grid", type=int, default=N_GRID)
+    parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args()
+    if args.seed is not None:
+        np.random.seed(args.seed)
 
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
@@ -287,7 +367,9 @@ def main():
 
     all_rewards, all_wins = [], []
 
-    if 1 in args.tests:
+    suffix = seed_suffix(args.seed)
+
+    if "1" in args.tests:
         mass_mid = (mass_lo + mass_hi) / 2.0
         eval_len_lo, eval_len_hi = compute_eval_range(len_lo, len_hi)
         length_vals = np.linspace(eval_len_lo, eval_len_hi, args.n_sweep_points)
@@ -310,8 +392,13 @@ def main():
 
         plot_1d(length_vals, np.array(t1_rewards), len_lo, len_hi,
                 "Link Length", "m", "eval/plots", args.n_eval_episodes)
+        np.savez(
+            f"eval/results/lqr_oracle{suffix}_test1_length.npz",
+            values=length_vals, rewards=np.array(t1_rewards),
+            bounds=np.array([len_lo, len_hi]),
+        )
 
-    if 2 in args.tests:
+    if "2" in args.tests:
         len_mid = (len_lo + len_hi) / 2.0
         eval_mass_lo, eval_mass_hi = compute_eval_range(mass_lo, mass_hi)
         mass_vals_sweep = np.linspace(eval_mass_lo, eval_mass_hi, args.n_sweep_points)
@@ -334,46 +421,51 @@ def main():
 
         plot_1d(mass_vals_sweep, np.array(t2_rewards), mass_lo, mass_hi,
                 "Link Mass", "kg", "eval/plots", args.n_eval_episodes)
+        np.savez(
+            f"eval/results/lqr_oracle{suffix}_test2_mass.npz",
+            values=mass_vals_sweep, rewards=np.array(t2_rewards),
+            bounds=np.array([mass_lo, mass_hi]),
+        )
 
-    if 3 in args.tests:
-        eval_len_lo2,  eval_len_hi2  = compute_eval_range(len_lo,  len_hi)
-        eval_mass_lo2, eval_mass_hi2 = compute_eval_range(mass_lo, mass_hi)
-        length_grid = np.linspace(eval_len_lo2,  eval_len_hi2,  args.n_grid)
-        mass_grid   = np.linspace(eval_mass_lo2, eval_mass_hi2, args.n_grid)
-        reward_grid = np.zeros((args.n_grid, args.n_grid))
-        total_cells = args.n_grid * args.n_grid
+    if "2.5" in args.tests:
+        n_vals, topo_rewards, topo_wins, topo_bounds = run_topology_sweep(
+            cfg, args.n_eval_episodes)
+        all_rewards.extend(topo_rewards.tolist())
+        all_wins.extend(topo_wins.tolist())
+        plot_topology_sweep(
+            n_vals, topo_rewards, topo_bounds,
+            "LQR Oracle Topology Sweep",
+            f"eval/plots/lqr{suffix}_topology_sweep.png",
+        )
+        np.savez(
+            f"eval/results/lqr_oracle{suffix}_test25_topology.npz",
+            n_links=n_vals, rewards=topo_rewards,
+            wins=topo_wins, train_topology=np.array(topo_bounds),
+        )
 
-        print(f"\n{'='*60}")
-        print(f"[Test 3] LQR 2D Heatmap — {args.n_grid}×{args.n_grid} grid ({total_cells} cells)")
-        print(f"  Length : {eval_len_lo2:.3f}m → {eval_len_hi2:.3f}m")
-        print(f"  Mass   : {eval_mass_lo2:.3f}kg → {eval_mass_hi2:.3f}kg")
-        print(f"{'='*60}")
+    if "3" in args.tests:
+        length_grid, mass_grid, reward_cube, win_cube, n_vals, l_bounds, m_bounds, topo_bounds = (
+            run_topology_heatmaps(cfg, args.n_eval_episodes, args.n_grid)
+        )
+        all_rewards.extend(reward_cube.reshape(-1).tolist())
+        all_wins.extend(win_cube.reshape(-1).tolist())
 
-        done = 0
-        for i, length in enumerate(length_grid):
-            for j, mass in enumerate(mass_grid):
-                r, w = eval_point(cfg, length, mass, args.n_eval_episodes)
-                reward_grid[j, i] = r
-                all_rewards.append(r);  all_wins.append(w)
-                done += 1
-                if done % 20 == 0 or done == total_cells:
-                    print(f"  [{done:4d}/{total_cells}]  "
-                          f"length={length:.3f}m  mass={mass:.3f}kg  "
-                          f"reward={r:7.2f}  win={w*100:.0f}%")
-
-        overall_winrate = float(np.mean(all_wins)) * 100
-
-        plot_2d(length_grid, mass_grid, reward_grid,
-                (len_lo, len_hi), (mass_lo, mass_hi),
-                overall_winrate, "eval/plots")
+        plot_topology_heatmaps(
+            length_grid, mass_grid, reward_cube, n_vals,
+            l_bounds, m_bounds, topo_bounds,
+            "LQR Oracle Heatmaps",
+            f"eval/plots/lqr{suffix}_heatmaps_by_topology.png",
+        )
 
         np.savez(
-            "eval/results/lqr_oracle_test3.npz",
-            lengths=length_grid, masses=mass_grid, rewards=reward_grid,
-            len_bounds=np.array([len_lo, len_hi]),
-            mass_bounds=np.array([mass_lo, mass_hi]),
+            f"eval/results/lqr_oracle{suffix}_test3.npz",
+            lengths=length_grid, masses=mass_grid, n_links=n_vals,
+            rewards=reward_cube, wins=win_cube,
+            len_bounds=np.array(l_bounds),
+            mass_bounds=np.array(m_bounds),
+            train_topology=np.array(topo_bounds),
         )
-        print("  Results saved → eval/results/lqr_oracle_test3.npz")
+        print(f"  Results saved -> eval/results/lqr_oracle{suffix}_test3.npz")
 
     print(f"\n{'='*55}")
     if all_wins:
