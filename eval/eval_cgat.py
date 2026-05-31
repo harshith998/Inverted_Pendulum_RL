@@ -33,6 +33,8 @@ import time
 import numpy as np
 import torch
 import yaml
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
@@ -50,6 +52,7 @@ from eval.topology import (
     plot_topology_sweep,
     seed_suffix,
     topology_tag,
+    topology_reward_ceilings,
     topology_values,
 )
 
@@ -82,6 +85,12 @@ def _default_ckpt(variant: str) -> str:
 
 def _seeded_ckpt(variant: str, seed: int | None) -> str:
     return f"checkpoints/cgat_{variant}_ppo{seed_suffix(seed)}_best.pt"
+
+
+def resolve_checkpoint(variant: str, requested: str | None, seed: int | None) -> str:
+    if requested is not None:
+        return requested
+    return _seeded_ckpt(variant, seed)
 
 
 def set_seed(seed: int | None):
@@ -152,7 +161,10 @@ def make_fixed_env(cfg: dict, link_length: float, link_mass: float,
         lo, hi = env_cfg["cart_mass_range"]
         cart_mass = (lo + hi) / 2.0
     if n_links is None:
-        n_links = env_cfg["n_links_range"][0]
+        n_links = env_cfg.get(
+            "nominal_eval_n_links",
+            round(sum(env_cfg["n_links_range"]) / 2),
+        )
     return VariablePendulumEnv(
         n_links_range     = (n_links, n_links),
         cart_mass_range   = (cart_mass, cart_mass),
@@ -552,12 +564,12 @@ def main():
 
     # ── Single variant mode ───────────────────────────────────────────────────
     variant    = args.variant
-    checkpoint = args.checkpoint or _seeded_ckpt(variant, args.seed)
+    checkpoint = resolve_checkpoint(variant, args.checkpoint, args.seed)
 
     if not os.path.exists(checkpoint):
         raise FileNotFoundError(
             f"Checkpoint not found: {checkpoint}\n"
-            f"Train first:  python3.12 training/train_cgat.py --variant {variant}")
+            f"Train first:  python3.12 training/train_cgat.py --variant {variant} --seed {args.seed}")
 
     print(f"\nDevice     : {device}")
     print(f"Policy     : CGAT-{variant}")
@@ -643,6 +655,7 @@ def main():
             l_v, m_v, r_cube, n_vals, l_bounds, m_bounds, topo_bounds,
             f"OOD Heatmaps | CGAT-{variant} PPO",
             f"eval/plots/cgat_{variant}_ppo{suffix}_ood_heatmaps_by_topology.png",
+            max_rewards=topology_reward_ceilings(cfg, n_vals),
         )
         np.savez(
             f"eval/results/cgat_{variant}_ppo{suffix}_test3.npz",
