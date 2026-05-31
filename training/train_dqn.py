@@ -223,6 +223,7 @@ def train(cfg, policy_name: str, show_plot: bool = True,
     os.makedirs("checkpoints", exist_ok=True)
     best_mean_reward = -np.inf
     best_model_path  = f"checkpoints/{policy_name}_dqn{seed_suffix(seed)}_best.pt"
+    legacy_model_path = f"checkpoints/{policy_name}_dqn_best.pt" if seed == 0 else None
 
     max_ep_steps = env_cfg["max_episode_steps"]
     obs, _       = env.reset(seed=seed)
@@ -297,7 +298,10 @@ def train(cfg, policy_name: str, show_plot: bool = True,
             # save only when mean reward improves
             if mean_r > best_mean_reward and len(ep_rewards) >= 20:
                 best_mean_reward = mean_r
-                torch.save(policy.state_dict(), best_model_path)
+                state_dict = policy.state_dict()
+                torch.save(state_dict, best_model_path)
+                if legacy_model_path is not None:
+                    torch.save(state_dict, legacy_model_path)
                 print(f"  *** new best reward {mean_r:.2f} → saved {best_model_path}")
 
             print(f"step {step:>7} | eps {epsilon:.3f} | episodes {ep_count:>5} "

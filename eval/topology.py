@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 import os
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
@@ -29,6 +31,23 @@ def topology_values(cfg: dict) -> list[int]:
 
 def topology_tag(n_links: int, train_range: tuple[int, int]) -> str:
     return "IN " if train_range[0] <= n_links <= train_range[1] else "OOD"
+
+
+def topology_reward_ceiling(cfg: dict, n_links: int) -> float:
+    env_cfg = cfg["environment"]
+    reward_cfg = cfg.get("rewards", {})
+    upright_weight = float(reward_cfg.get("upright_weight", 1.0))
+    alive_bonus = float(reward_cfg.get("alive_bonus", 0.1))
+    max_steps = int(env_cfg["max_episode_steps"])
+    win_bonus = 2.0
+    return max_steps * (upright_weight * n_links + alive_bonus) + win_bonus
+
+
+def topology_reward_ceilings(cfg: dict, n_links_vals) -> np.ndarray:
+    return np.array(
+        [topology_reward_ceiling(cfg, int(n_links)) for n_links in n_links_vals],
+        dtype=np.float32,
+    )
 
 
 def plot_topology_sweep(
@@ -76,6 +95,7 @@ def plot_topology_heatmaps(
     train_topology_range,
     title: str,
     path: str,
+    max_rewards=None,
 ):
     n = len(n_links_vals)
     ncols = min(3, n)
@@ -86,11 +106,26 @@ def plot_topology_heatmaps(
     im = None
     len_lo, len_hi = len_bounds
     mass_lo, mass_hi = mass_bounds
+    plot_cube = reward_cube
+    cbar_label = "Mean Reward"
+    vmin, vmax = 0, 2000
+    if max_rewards is not None:
+        max_rewards = np.asarray(max_rewards, dtype=np.float32).reshape(-1, 1, 1)
+        plot_cube = np.divide(
+            reward_cube,
+            max_rewards,
+            out=np.zeros_like(reward_cube, dtype=np.float32),
+            where=max_rewards > 0,
+        )
+        plot_cube = np.clip(plot_cube, 0.0, 1.0)
+        cbar_label = "Normalized Reward"
+        vmin, vmax = 0.0, 1.0
+
     for idx, n_links in enumerate(n_links_vals):
         ax = axes[idx // ncols][idx % ncols]
         im = ax.pcolormesh(
-            length_vals, mass_vals, reward_cube[idx],
-            cmap="Greens", vmin=0, vmax=2000, shading="auto",
+            length_vals, mass_vals, plot_cube[idx],
+            cmap="Greens", vmin=vmin, vmax=vmax, shading="auto",
         )
         rect = mpatches.Rectangle(
             (len_lo, mass_lo), len_hi - len_lo, mass_hi - mass_lo,
@@ -109,10 +144,9 @@ def plot_topology_heatmaps(
 
     if im is not None:
         cbar = fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.025, pad=0.02)
-        cbar.set_label("Mean Reward")
+        cbar.set_label(cbar_label)
     fig.suptitle(title)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Plot saved -> {path}")
-

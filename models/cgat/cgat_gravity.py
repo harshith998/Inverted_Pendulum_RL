@@ -39,8 +39,8 @@ class CGATGravityEncoder(CGATEncoderBase):
 
     def __init__(self, hidden: int, n_icga_layers: int, n_heads: int):
         super().__init__(hidden, n_icga_layers, n_heads, icga_cls=ICGALayer)
-        # bias=False keeps injection zero-initialised (Linear weight init ≈ 0 mean)
         self.gravity_proj = nn.Linear(1, hidden, bias=False)
+        nn.init.zeros_(self.gravity_proj.weight)
 
     def forward(self, obs: dict, M_tilde: torch.Tensor) -> torch.Tensor:
         node_features = obs["node_features"].float()
@@ -54,7 +54,7 @@ class CGATGravityEncoder(CGATEncoderBase):
         h = self.node_embed(node_features)
 
         # Inject gravity torques as additive residual on node embeddings
-        g_torques = compute_gravity_torques(obs)            # (B, max_nodes)
+        g_torques = compute_gravity_torques(obs).clamp(-5.0, 5.0)  # (B, max_nodes)
         h = h + self.gravity_proj(g_torques.unsqueeze(-1))  # (B, max_nodes, hidden)
 
         for layer in self.icga_layers:

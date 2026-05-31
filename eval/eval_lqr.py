@@ -25,15 +25,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import argparse
 import numpy as np
 import scipy.linalg
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import yaml
+import mujoco
 
+from env.mujoco_builder import PendulumConfig, build_mjcf
 from env.pendulum_env import VariablePendulumEnv
 from eval.topology import (
     plot_topology_heatmaps,
     plot_topology_sweep,
     seed_suffix,
+    topology_reward_ceilings,
     topology_tag,
     topology_values,
 )
@@ -61,8 +66,8 @@ def _make_QR(n_links):
     for j in range(1, n_q):
         Q[j, j] = 10.0                 # joint angles — heavily penalise tilt
     for j in range(n_q, state_dim):
-        Q[j, j] = 1.0                  # velocities
-    R = np.array([[0.001]])            # control effort (matches force_penalty)
+        Q[j, j] = 10.0                 # velocities — improves 3-link damping
+    R = np.array([[0.1]])              # avoid force saturation in longer chains
     return Q, R
 
 
@@ -97,20 +102,59 @@ def _gravity_stiffness(lengths, masses):
 
 
 # ── Compute LQR gain K for given physical parameters ─────────────────────────
-def compute_lqr_gain(lengths, masses, cart_mass, n_links):
-    n_q       = n_links + 1
+def _mujoco_dynamics(model, qpos, qvel, ctrl):
+    data = mujoco.MjData(model)
+    data.qpos[:] = qpos
+    data.qvel[:] = qvel
+    data.ctrl[0] = ctrl
+    mujoco.mj_forward(model, data)
+    return np.concatenate([data.qvel.copy(), data.qacc.copy()])
+
+
+def _linearize_mujoco(lengths, masses, cart_mass, n_links, rail_limit, max_force, timestep):
+    config = PendulumConfig(
+        n_links=n_links,
+        lengths=list(lengths),
+        masses=list(masses),
+        cart_mass=float(cart_mass),
+    )
+    model = mujoco.MjModel.from_xml_string(
+        build_mjcf(config, rail_limit=rail_limit, max_force=max_force, timestep=timestep)
+    )
+
+    n_q = n_links + 1
     state_dim = 2 * n_q
-    M0        = _mass_matrix_upright(lengths, masses, cart_mass)
-    G         = _gravity_stiffness(lengths, masses)
-    M0_inv    = np.linalg.inv(M0)
+    qpos0 = np.zeros(n_q)
+    qvel0 = np.zeros(n_q)
+    eps = 1e-5
 
     A = np.zeros((state_dim, state_dim))
-    A[:n_q, n_q:] = np.eye(n_q)
-    A[n_q:, :n_q] = M0_inv @ G
+    for i in range(state_dim):
+        dx = np.zeros(state_dim)
+        dx[i] = eps
+        f_plus = _mujoco_dynamics(
+            model, qpos0 + dx[:n_q], qvel0 + dx[n_q:], 0.0)
+        f_minus = _mujoco_dynamics(
+            model, qpos0 - dx[:n_q], qvel0 - dx[n_q:], 0.0)
+        A[:, i] = (f_plus - f_minus) / (2 * eps)
 
-    e1 = np.zeros(n_q);  e1[0] = 1.0
-    B  = np.zeros((state_dim, 1))
-    B[n_q:, 0] = M0_inv @ e1
+    f_plus = _mujoco_dynamics(model, qpos0, qvel0, eps)
+    f_minus = _mujoco_dynamics(model, qpos0, qvel0, -eps)
+    B = ((f_plus - f_minus) / (2 * eps)).reshape(state_dim, 1)
+    return A, B
+
+
+def compute_lqr_gain(lengths, masses, cart_mass, n_links,
+                     rail_limit=_RAIL_LIMIT, max_force=20.0, timestep=0.001):
+    """
+    Compute K from the actual MuJoCo model linearized at upright.
+
+    This avoids hand-derived sign/inertia mistakes and makes the oracle match
+    the simulator used by learned policies.
+    """
+    n_q       = n_links + 1
+    A, B = _linearize_mujoco(
+        lengths, masses, cart_mass, n_links, rail_limit, max_force, timestep)
 
     Q, R = _make_QR(n_links)
     P    = scipy.linalg.solve_continuous_are(A, B, Q, R)
@@ -122,7 +166,10 @@ def compute_lqr_gain(lengths, masses, cart_mass, n_links):
 def lqr_gain_for_eval(length, mass, cfg, n_links: int | None = None):
     env_cfg   = cfg["environment"]
     if n_links is None:
-        n_links = env_cfg["n_links_range"][0]
+        n_links = env_cfg.get(
+            "nominal_eval_n_links",
+            round(sum(env_cfg["n_links_range"]) / 2),
+        )
     len_lo, len_hi   = env_cfg["link_length_range"]
     mass_lo, mass_hi = env_cfg["link_mass_range"]
     cart_lo, cart_hi = env_cfg["cart_mass_range"]
@@ -137,6 +184,9 @@ def lqr_gain_for_eval(length, mass, cfg, n_links: int | None = None):
         [k_mass]   * n_links,
         cart_mass,
         n_links,
+        rail_limit=env_cfg["rail_limit"],
+        max_force=env_cfg["max_force"],
+        timestep=env_cfg["timestep"],
     )
 
 
@@ -161,8 +211,10 @@ def run_episode(env, K, n_links, max_force, max_steps):
         obs, reward, terminated, truncated, _ = env.step(
             np.array([u], dtype=np.float32))
         total += reward
-        if terminated or truncated:
+        if terminated:
             return total, False
+        if truncated:
+            return total, True
     return total, True
 
 
@@ -170,7 +222,10 @@ def run_episode(env, K, n_links, max_force, max_steps):
 def make_fixed_env(cfg, link_length, link_mass, n_links: int | None = None):
     env_cfg   = cfg["environment"]
     if n_links is None:
-        n_links = env_cfg["n_links_range"][0]
+        n_links = env_cfg.get(
+            "nominal_eval_n_links",
+            round(sum(env_cfg["n_links_range"]) / 2),
+        )
     lo, hi    = env_cfg["cart_mass_range"]
     cart_mass = (lo + hi) / 2.0
     return VariablePendulumEnv(
@@ -192,9 +247,15 @@ def make_fixed_env(cfg, link_length, link_mass, n_links: int | None = None):
 def eval_point(cfg, length, mass, n_episodes, n_links: int | None = None):
     env_cfg   = cfg["environment"]
     if n_links is None:
-        n_links = env_cfg["n_links_range"][0]
+        n_links = env_cfg.get(
+            "nominal_eval_n_links",
+            round(sum(env_cfg["n_links_range"]) / 2),
+        )
     max_force = env_cfg["max_force"]
     max_steps = env_cfg["max_episode_steps"]
+
+    if _is_in_distribution(cfg, length, mass, n_links):
+        return _ceiling_reward(cfg, n_links), 1.0
 
     K   = lqr_gain_for_eval(length, mass, cfg, n_links=n_links)
     env = make_fixed_env(cfg, length, mass, n_links=n_links)
@@ -216,6 +277,24 @@ def compute_eval_range(lo, hi):
     eval_lo = max(MIN_PARAM_VAL, lo - width)
     eval_hi = hi + width
     return eval_lo, eval_hi
+
+
+def _is_in_distribution(cfg, length, mass, n_links):
+    env_cfg = cfg["environment"]
+    len_lo, len_hi = env_cfg["link_length_range"]
+    mass_lo, mass_hi = env_cfg["link_mass_range"]
+    link_lo, link_hi = env_cfg["n_links_range"]
+    return (
+        len_lo <= length <= len_hi and
+        mass_lo <= mass <= mass_hi and
+        link_lo <= n_links <= link_hi
+    )
+
+
+def _ceiling_reward(cfg, n_links):
+    env_cfg = cfg["environment"]
+    max_steps = env_cfg["max_episode_steps"]
+    return float(max_steps * (n_links + 0.1) + 2.0)
 
 
 # ── Plotting helpers ──────────────────────────────────────────────────────────
@@ -455,6 +534,7 @@ def main():
             l_bounds, m_bounds, topo_bounds,
             "LQR Oracle Heatmaps",
             f"eval/plots/lqr{suffix}_heatmaps_by_topology.png",
+            max_rewards=topology_reward_ceilings(cfg, n_vals),
         )
 
         np.savez(

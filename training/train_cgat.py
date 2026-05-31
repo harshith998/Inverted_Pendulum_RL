@@ -287,6 +287,7 @@ def train(cfg, variant: str = "base", plot: bool = True, show_plot: bool = True,
     os.makedirs("checkpoints", exist_ok=True)
     best_mean_reward = -np.inf
     best_model_path  = f"checkpoints/cgat_{variant}_ppo{seed_suffix(seed)}_best.pt"
+    legacy_model_path = f"checkpoints/cgat_{variant}_ppo_best.pt" if seed == 0 else None
 
     obs_list   = [
         env.reset(seed=None if seed is None else seed + i)[0]
@@ -391,7 +392,10 @@ def train(cfg, variant: str = "base", plot: bool = True, show_plot: bool = True,
 
         if mean_r > best_mean_reward and len(all_ep_rewards) >= 20:
             best_mean_reward = mean_r
-            torch.save(policy.state_dict(), best_model_path)
+            state_dict = policy.state_dict()
+            torch.save(state_dict, best_model_path)
+            if legacy_model_path is not None:
+                torch.save(state_dict, legacy_model_path)
             print(f"  *** new best {mean_r:.2f} → {best_model_path}")
 
         cur_lr = optimizer.param_groups[0]["lr"]

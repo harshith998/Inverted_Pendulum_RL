@@ -24,6 +24,8 @@ import time
 import numpy as np
 import torch
 import yaml
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
@@ -36,6 +38,7 @@ from eval.topology import (
     plot_topology_sweep,
     seed_suffix,
     topology_tag,
+    topology_reward_ceilings,
     topology_values,
 )
 
@@ -66,6 +69,12 @@ def set_seed(seed: int | None):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def resolve_checkpoint(policy_name: str, requested: str | None, seed: int | None) -> str:
+    if requested is not None:
+        return requested
+    return f"checkpoints/{policy_name}_dqn{seed_suffix(seed)}_best.pt"
 
 
 
@@ -111,7 +120,10 @@ def make_fixed_env(cfg: dict, link_length: float, link_mass: float,
         lo, hi = env_cfg["cart_mass_range"]
         cart_mass = (lo + hi) / 2.0
     if n_links is None:
-        n_links = env_cfg["n_links_range"][0]
+        n_links = env_cfg.get(
+            "nominal_eval_n_links",
+            round(sum(env_cfg["n_links_range"]) / 2),
+        )
     return VariablePendulumEnv(
         n_links_range       = (n_links, n_links),
         cart_mass_range     = (cart_mass, cart_mass),
@@ -420,11 +432,11 @@ def main():
             "Test 4 few-shot adaptation is implemented for PPO/CGAT policies. "
             "DQN needs a separate replay-buffer/target-network adaptation protocol.")
 
-    checkpoint = args.checkpoint or f"checkpoints/{args.policy}_dqn{seed_suffix(args.seed)}_best.pt"
+    checkpoint = resolve_checkpoint(args.policy, args.checkpoint, args.seed)
     if args.policy != "random" and not os.path.exists(checkpoint):
         raise FileNotFoundError(
             f"Checkpoint not found: {checkpoint}\n"
-            f"Run training first:  python3.12 training/train_dqn.py --policy {args.policy}")
+            f"Run training first:  python3.12 training/train_dqn.py --policy {args.policy} --seed {args.seed}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\nDevice     : {device}")
@@ -513,6 +525,7 @@ def main():
             l_v, m_v, r_cube, n_vals, l_bounds, m_bounds, topo_bounds,
             f"OOD Heatmaps | {args.policy.upper()} DQN",
             f"eval/plots/{args.policy}_dqn{suffix}_ood_heatmaps_by_topology.png",
+            max_rewards=topology_reward_ceilings(cfg, n_vals),
         )
         np.savez(
             f"eval/results/{args.policy}_dqn{suffix}_test3.npz",

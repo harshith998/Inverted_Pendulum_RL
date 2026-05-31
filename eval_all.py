@@ -123,7 +123,59 @@ def _build_cmd(job: dict, args, seed: int) -> list[str] | None:
     return cmd
 
 
-def run_job(job: dict, args, seed: int, job_idx: int, n_jobs: int) -> bool:
+def _cmd_arg(cmd: list[str], flag: str) -> str | None:
+    if flag not in cmd:
+        return None
+    idx = cmd.index(flag)
+    if idx + 1 >= len(cmd):
+        return None
+    return cmd[idx + 1]
+
+
+def _checkpoint_path(job: dict, seed: int) -> str | None:
+    name = job["name"]
+    if name == "lqr_oracle":
+        return None
+
+    if name.startswith("ppo_"):
+        policy = _cmd_arg(job["cmd"], "--policy")
+        return f"checkpoints/{policy}_ppo_seed{seed}_best.pt"
+
+    if name.startswith("dqn_"):
+        policy = _cmd_arg(job["cmd"], "--policy")
+        return f"checkpoints/{policy}_dqn_seed{seed}_best.pt"
+
+    if name.startswith("cgat_"):
+        variant = _cmd_arg(job["cmd"], "--variant")
+        return f"checkpoints/cgat_{variant}_ppo_seed{seed}_best.pt"
+
+    return None
+
+
+def _missing_checkpoint_message(job: dict, seed: int, seeded: str) -> str:
+    name = job["name"]
+    if name.startswith("ppo_"):
+        policy = _cmd_arg(job["cmd"], "--policy")
+        return f"python3.12 training/train_ppo.py --policy {policy} --seed {seed}"
+    if name.startswith("dqn_"):
+        policy = _cmd_arg(job["cmd"], "--policy")
+        return f"python3.12 training/train_dqn.py --policy {policy} --seed {seed}"
+    if name.startswith("cgat_"):
+        variant = _cmd_arg(job["cmd"], "--variant")
+        return f"python3.12 training/train_cgat.py --variant {variant} --seed {seed}"
+    return f"missing checkpoint: {seeded}"
+
+
+def _checkpoint_available(job: dict, seed: int) -> tuple[bool, str | None]:
+    seeded = _checkpoint_path(job, seed)
+    if seeded is None:
+        return True, None
+    if os.path.exists(seeded):
+        return True, None
+    return False, seeded
+
+
+def run_job(job: dict, args, seed: int, job_idx: int, n_jobs: int) -> str:
     name = job["name"]
     cmd = _build_cmd(job, args, seed)
     if cmd is None:
@@ -132,16 +184,22 @@ def run_job(job: dict, args, seed: int, job_idx: int, n_jobs: int) -> bool:
             print("  Skipped: LQR oracle only supports Tests 1-3.")
         else:
             print("  Skipped: Test 4 is not implemented for DQN eval.")
-        return True
+        return "skip"
 
     _print_header(f"[{job_idx}/{n_jobs}]  {name}  seed={seed}")
+
+    available, detail = _checkpoint_available(job, seed)
+    if not available:
+        print(f"  Skipped: checkpoint not found: {detail}")
+        print(f"  Train it with: {_missing_checkpoint_message(job, seed, detail)}")
+        return "skip"
     print(f"  Command : {' '.join(cmd)}")
 
     log_path = os.path.join(args.log_dir, f"{name}_seed{seed}.log")
     print(f"  Log     : {log_path}\n")
 
     if args.dry_run:
-        return True
+        return "ok"
 
     t_start = time.time()
     with open(log_path, "w") as log_file:
@@ -167,7 +225,7 @@ def run_job(job: dict, args, seed: int, job_idx: int, n_jobs: int) -> bool:
     status = "DONE" if ok else f"FAILED (exit {proc.returncode})"
     print(f"\n  {name}: {status} in {elapsed / 60:.1f} min  "
           f"(log -> {log_path})")
-    return ok
+    return "ok" if ok else "fail"
 
 
 def main():
@@ -259,20 +317,29 @@ def main():
     results = {}
     t_all = time.time()
     for i, (job, seed) in enumerate(expanded_jobs, 1):
-        ok = run_job(job, args, seed, i, len(expanded_jobs))
-        results[f"{job['name']}_seed{seed}"] = ok
+        status = run_job(job, args, seed, i, len(expanded_jobs))
+        results[f"{job['name']}_seed{seed}"] = status
 
     total_elapsed = time.time() - t_all
     _print_header(f"Summary  ({total_elapsed / 60:.1f} min total)")
-    for name, ok in results.items():
-        icon = "OK" if ok else "FAIL"
-        print(f"  {icon:<4} {name}")
+    labels = {"ok": "OK", "fail": "FAIL", "skip": "SKIP"}
+    for name, status in results.items():
+        print(f"  {labels[status]:<4} {name}")
 
-    failed = [n for n, ok in results.items() if not ok]
+    failed = [n for n, status in results.items() if status == "fail"]
+    skipped = [n for n, status in results.items() if status == "skip"]
     if failed:
         print(f"\n  {len(failed)} job(s) failed: {failed}")
         sys.exit(1)
-    print(f"\n  All {len(results)} eval job(s) completed successfully.")
+    if skipped:
+        print(f"\n  {len(skipped)} job(s) skipped because required checkpoints/features were missing.")
+        print("  No eval jobs failed.")
+    else:
+        print(f"\n  All {len(results)} eval job(s) completed successfully.")
+
+    if skipped:
+        print("  Seed aggregation skipped because not every requested seed ran.")
+        return
 
     if not args.dry_run and not args.no_aggregate and len(args.seeds) > 1:
         from eval.aggregate_seeds import aggregate_results
