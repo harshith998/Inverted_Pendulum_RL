@@ -1,0 +1,53 @@
+robot:
+  n_links: 3
+  gravity: 9.81
+  control_dt: 0.005
+
+  cart_mass_kg: 1.0
+  link_lengths_m: [0.30, 0.30, 0.30]
+  link_masses_kg: [0.10, 0.10, 0.10]
+
+actuator:
+  max_force_n: 20.0
+  # Convert desired force to motor command. This must be identified on the real
+  # build. Start conservative. The STM32 should also enforce its own PWM limit.
+  pwm_per_newton: 0.04
+  max_pwm: 0.35
+
+encoders:
+  # Use the motor encoder for cart position. For a GT2 20T pulley, one pulley
+  # revolution moves 20 * 2 mm = 0.040 m of belt. Fill in the true quadrature
+  # counts per pulley revolution after confirming the Pololu encoder mode.
+  cart_counts_per_meter: 30000.0
+  cart_sign: 1
+  cart_zero_count: 0
+
+  # LPD3806-600BM is 600 pulses/rev. With x4 quadrature decoding this is 2400
+  # counts/rev. Change this if the firmware reports x1/x2 counts instead.
+  joint_counts_per_rev: [2400.0, 2400.0, 2400.0]
+  joint_signs: [1, 1, 1]
+  joint_zero_counts: [0, 0, 0]
+
+lqr:
+  # Bryson-style starting point. These are acceptable max deviations, not hard
+  # limits. Smaller values mean higher penalty.
+  max_state:
+    cart_position_m: 0.40
+    joint_angle_rad: [0.10, 0.10, 0.10]
+    cart_velocity_mps: 1.50
+    joint_velocity_radps: [3.0, 3.0, 3.0]
+  max_force_n: 12.0
+  riccati_tolerance: 1.0e-9
+  riccati_max_iterations: 10000
+
+safety:
+  rail_limit_m: 0.25
+  angle_limit_rad: 0.35
+  velocity_limit_mps: 3.0
+  angular_velocity_limit_radps: 12.0
+  stale_packet_timeout_s: 0.05
+
+serial:
+  port: "/dev/tty.usbmodemXXXX"
+  baudrate: 115200
+  read_timeout_s: 0.02

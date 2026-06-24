@@ -1,0 +1,73 @@
+environment:
+  n_links_range: [3, 3]
+  max_links: 3
+  nominal_eval_n_links: 3
+  topology_eval_n_links: [3]
+  cart_mass_range: [0.5, 3.0]
+  link_length_range: [0.3, 1.2]
+  link_mass_range: [0.1, 2.0]
+  rail_limit: 2.5
+  max_force: 20.0
+  timestep: 0.001
+  frame_skip: 4
+  max_episode_steps: 1000
+  termination_angle: 0.7854
+
+graph:
+  node_feat_dim: 9
+  edge_feat_dim: 2
+
+rewards:
+  upright_weight: 1.0
+  alive_bonus: 0.1
+  force_penalty: 0.001
+  rail_penalty: 0.01
+
+init:
+  angle_noise: 0.05
+  vel_noise: 0.01
+
+ppo:
+  hidden_dim: 192
+  n_layers: 3
+  n_heads: 4
+  dropout: 0.05
+  n_envs: 8
+  rollout_steps: 4096
+  n_epochs: 6
+  mini_batch_size: 512
+  gamma: 0.995
+  gae_lambda: 0.97
+  clip_epsilon: 0.15
+  value_coef: 0.5
+  entropy_coef: 0.015
+  lr: 0.00015
+  anneal_lr: true
+  max_grad_norm: 0.5
+  total_steps: 3000000
+  save_interval: 100000
+  cgat:
+    hidden_dim: 192
+    n_icga_layers: 3
+    n_heads: 3
+    entropy_coef: 0.015
+
+dqn:
+  n_action_bins: 51
+  hidden_dim: 64
+  n_mp_layers: 2
+  replay_capacity: 100000
+  batch_size: 64
+  gamma: 0.99
+  lr: 0.00005
+  eps_start: 1.0
+  eps_end: 0.05
+  eps_decay_steps: 150000
+  warmup_steps: 1000
+  update_freq: 4
+  target_update_freq: 1000
+  weight_decay: 0.0001
+  dropout: 0.1
+  total_steps: 2000000
+  log_interval: 1000
+  save_interval: 100000
