@@ -53,6 +53,8 @@ class VariablePendulumEnv(gymnasium.Env):
         min_episode_steps: int = 50,
         angle_noise: float = 0.05,
         vel_noise: float = 0.01,
+        reward_config: dict | None = None,
+        parameter_regions: list[dict] | None = None,
         max_links: int | None = None,
         render_mode: str | None = None,
     ):
@@ -71,6 +73,8 @@ class VariablePendulumEnv(gymnasium.Env):
         self.min_episode_steps = min_episode_steps
         self.angle_noise = angle_noise
         self.vel_noise = vel_noise
+        self.reward_config = reward_config or {}
+        self.parameter_regions = parameter_regions or []
         self.render_mode = render_mode
 
         self.max_links = max_links if max_links is not None else n_links_range[1]
@@ -84,6 +88,7 @@ class VariablePendulumEnv(gymnasium.Env):
         self._mj_data: mujoco.MjData | None = None
         self._config: PendulumConfig | None = None
         self._step_count: int = 0
+        self._prev_action: float = 0.0
         self._viewer = None   # passive viewer, opened lazily on first render()
 
         self.action_space = spaces.Box(
@@ -116,6 +121,7 @@ class VariablePendulumEnv(gymnasium.Env):
     def reset(self, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
         self._step_count = 0
+        self._prev_action = 0.0
 
         config = self._sample_config()
         self._load_model(config)
@@ -137,10 +143,26 @@ class VariablePendulumEnv(gymnasium.Env):
 
         joint_angles = self._get_joint_angles()
         cart_pos = float(self._mj_data.qpos[0])
-        reward, reward_info = compute_reward(joint_angles, cart_pos, float(action[0]))
+        reward, reward_info = compute_reward(
+            joint_angles,
+            cart_pos,
+            float(action[0]),
+            prev_action=self._prev_action,
+            cart_vel=float(self._mj_data.qvel[0]),
+            joint_vels=np.array(self._mj_data.qvel[1:self._config.n_links + 1], dtype=np.float32),
+            termination_angle=self.termination_angle,
+            rail_limit=self.rail_limit,
+            **self.reward_config,
+        )
+        self._prev_action = float(action[0])
 
         terminated = self._is_terminated(joint_angles, cart_pos)
         truncated = self._step_count >= self.max_episode_steps
+
+        if terminated:
+            failure_penalty = float(self.reward_config.get("failure_penalty", 0.0))
+            reward -= failure_penalty
+            reward_info["failure_penalty"] = -failure_penalty
 
         if truncated:
             reward += 2.0
@@ -178,11 +200,28 @@ class VariablePendulumEnv(gymnasium.Env):
 
     def _sample_config(self) -> PendulumConfig:
         rng = self.np_random
-        n_links = int(rng.integers(self.n_links_range[0], self.n_links_range[1] + 1))
-        lengths = rng.uniform(*self.link_length_range, size=n_links).tolist()
-        masses = rng.uniform(*self.link_mass_range, size=n_links).tolist()
-        cart_mass = float(rng.uniform(*self.cart_mass_range))
+        region = self._sample_parameter_region()
+        n_links_range = tuple(region.get("n_links_range", self.n_links_range))
+        length_range = tuple(region.get("link_length_range", self.link_length_range))
+        mass_range = tuple(region.get("link_mass_range", self.link_mass_range))
+        cart_mass_range = tuple(region.get("cart_mass_range", self.cart_mass_range))
+
+        n_links = int(rng.integers(n_links_range[0], n_links_range[1] + 1))
+        lengths = rng.uniform(*length_range, size=n_links).tolist()
+        masses = rng.uniform(*mass_range, size=n_links).tolist()
+        cart_mass = float(rng.uniform(*cart_mass_range))
         return PendulumConfig(n_links=n_links, lengths=lengths, masses=masses, cart_mass=cart_mass)
+
+    def _sample_parameter_region(self) -> dict:
+        if not self.parameter_regions:
+            return {}
+        weights = np.array(
+            [float(region.get("weight", 1.0)) for region in self.parameter_regions],
+            dtype=np.float64,
+        )
+        weights = weights / weights.sum()
+        idx = int(self.np_random.choice(len(self.parameter_regions), p=weights))
+        return self.parameter_regions[idx]
 
     def _load_model(self, config: PendulumConfig):
         xml = build_mjcf(config, rail_limit=self.rail_limit, max_force=self.max_force, timestep=self.timestep)

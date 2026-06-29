@@ -1,0 +1,116 @@
+environment:
+  n_links_range: [3, 3]
+  max_links: 3
+  nominal_eval_n_links: 3
+  topology_eval_n_links: [3]
+  cart_mass_range: [0.5, 3.0]
+  link_length_range: [0.3, 1.2]
+  link_mass_range: [0.1, 2.0]
+  parameter_regions:
+    - weight: 1.0
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.3, 1.2]
+      link_mass_range: [0.1, 2.0]
+    - weight: 2.5
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.05, 0.85]
+      link_mass_range: [0.05, 1.6]
+    - weight: 3.0
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.05, 0.85]
+      link_mass_range: [1.6, 3.9]
+    - weight: 2.5
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.85, 2.1]
+      link_mass_range: [0.05, 3.9]
+  rail_limit: 2.5
+  max_force: 20.0
+  timestep: 0.001
+  frame_skip: 4
+  max_episode_steps: 1000
+  termination_angle: 0.7854
+
+graph:
+  node_feat_dim: 9
+  edge_feat_dim: 2
+
+rewards:
+  upright_weight: 1.0
+  alive_bonus: 0.50
+  force_penalty: 0.00025
+  action_rate_penalty: 0.00004
+  rail_penalty: 0.007
+  angle_penalty: 0.001
+  angular_velocity_penalty: 0.000035
+  cart_velocity_penalty: 0.00008
+  angle_margin_weight: 0.20
+  rail_margin_weight: 0.08
+  failure_penalty: 0.8
+
+init:
+  angle_noise: 0.025
+  vel_noise: 0.006
+
+validation:
+  interval_updates: 2
+  n_episodes: 2
+  aggregate: mean
+  reward_config:
+    upright_weight: 1.0
+    alive_bonus: 0.1
+    force_penalty: 0.001
+    rail_penalty: 0.01
+  points:
+    - [0.05, 0.05]
+    - [0.28, 0.05]
+    - [0.50, 0.05]
+    - [0.73, 0.05]
+    - [1.19, 0.05]
+    - [1.64, 0.05]
+    - [2.10, 0.05]
+    - [0.05, 0.48]
+    - [0.28, 0.48]
+    - [0.73, 0.48]
+    - [1.19, 0.91]
+    - [1.64, 1.33]
+    - [0.05, 2.19]
+    - [0.28, 2.62]
+    - [0.50, 3.04]
+    - [0.73, 3.47]
+    - [0.96, 3.90]
+    - [1.42, 3.90]
+    - [1.87, 3.47]
+    - [2.10, 3.90]
+
+ppo:
+  hidden_dim: 128
+  n_layers: 3
+  n_heads: 4
+  dropout: 0.1
+  n_envs: 4
+  rollout_steps: 1024
+  n_epochs: 4
+  mini_batch_size: 256
+  gamma: 0.998
+  gae_lambda: 0.98
+  clip_epsilon: 0.025
+  value_coef: 0.55
+  entropy_coef: 0.00002
+  init_log_std: -2.45
+  freeze_log_std: true
+  trainable_prefixes:
+    - gain_net
+    - param_residual_net
+    - actor_trunk
+    - mean_head
+    - critic_trunk
+    - value_head
+  lr: 0.0000015
+  anneal_lr: false
+  max_grad_norm: 0.10
+  total_steps: 80000
+  save_interval: 40000
+  cgat:
+    n_icga_layers: 2
+    n_heads: 2
+    entropy_coef: 0.00002

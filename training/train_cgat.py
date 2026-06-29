@@ -213,10 +213,136 @@ def _beta_label(policy, variant: str) -> str:
     return f"β {float(beta.item()):+.3f}"
 
 
+def _fixed_eval_env(cfg: dict, link_length: float, link_mass: float,
+                    reward_config: dict | None = None) -> VariablePendulumEnv:
+    env_cfg = cfg["environment"]
+    cart_lo, cart_hi = env_cfg["cart_mass_range"]
+    cart_mass = (cart_lo + cart_hi) / 2.0
+    return VariablePendulumEnv(
+        n_links_range=(3, 3),
+        cart_mass_range=(cart_mass, cart_mass),
+        link_length_range=(link_length, link_length),
+        link_mass_range=(link_mass, link_mass),
+        rail_limit=env_cfg["rail_limit"],
+        max_force=env_cfg["max_force"],
+        timestep=env_cfg["timestep"],
+        frame_skip=env_cfg["frame_skip"],
+        max_episode_steps=env_cfg["max_episode_steps"],
+        termination_angle=env_cfg["termination_angle"],
+        angle_noise=cfg.get("init", {}).get("angle_noise", 0.05),
+        vel_noise=cfg.get("init", {}).get("vel_noise", 0.01),
+        reward_config=cfg.get("rewards", {}) if reward_config is None else reward_config,
+        max_links=env_cfg.get("max_links"),
+    )
+
+
+def deterministic_validation_score(policy, cfg: dict, device: torch.device,
+                                   points: list[list[float]],
+                                   n_episodes: int,
+                                   reward_config: dict | None = None,
+                                   aggregate: str = "mean") -> float:
+    scores = []
+    policy.eval()
+    for link_length, link_mass in points:
+        env = _fixed_eval_env(
+            cfg, float(link_length), float(link_mass),
+            reward_config=reward_config,
+        )
+        try:
+            for _ in range(n_episodes):
+                obs, _ = env.reset()
+                ep_reward = 0.0
+                done = False
+                while not done:
+                    action = policy.get_deterministic_action(obs, device)
+                    obs, reward, terminated, truncated, _ = env.step(
+                        np.array([action], dtype=np.float32)
+                    )
+                    ep_reward += reward
+                    done = terminated or truncated
+                scores.append(ep_reward)
+        finally:
+            env.close()
+    if not scores:
+        return -np.inf
+    scores_arr = np.array(scores, dtype=np.float32)
+    if aggregate == "min":
+        return float(np.min(scores_arr))
+    if aggregate.startswith("p"):
+        percentile = float(aggregate[1:])
+        return float(np.percentile(scores_arr, percentile))
+    if aggregate == "median":
+        return float(np.median(scores_arr))
+    if aggregate != "mean":
+        raise ValueError(f"Unknown validation aggregate: {aggregate}")
+    return float(np.mean(scores_arr))
+
+
+def _eval_range(lo: float, hi: float) -> tuple[float, float]:
+    width = hi - lo
+    return max(0.05, lo - width), hi + width
+
+
+def heatmap_validation_score(policy, cfg: dict, device: torch.device,
+                             n_grid: int,
+                             n_episodes: int,
+                             reward_config: dict | None = None,
+                             aggregate: str = "mean",
+                             seed: int | None = None) -> float:
+    """Small eval-shaped validation grid for checkpoint selection."""
+    env_cfg = cfg["environment"]
+    len_lo, len_hi = _eval_range(*env_cfg["link_length_range"])
+    mass_lo, mass_hi = _eval_range(*env_cfg["link_mass_range"])
+    lengths = np.linspace(len_lo, len_hi, n_grid)
+    masses = np.linspace(mass_lo, mass_hi, n_grid)
+
+    scores = []
+    policy.eval()
+    for i, link_length in enumerate(lengths):
+        for j, link_mass in enumerate(masses):
+            env = _fixed_eval_env(
+                cfg, float(link_length), float(link_mass),
+                reward_config=reward_config,
+            )
+            try:
+                for ep in range(n_episodes):
+                    reset_seed = None
+                    if seed is not None:
+                        reset_seed = int(seed + 1009 * i + 9173 * j + ep)
+                    obs, _ = env.reset(seed=reset_seed)
+                    ep_reward = 0.0
+                    done = False
+                    while not done:
+                        action = policy.get_deterministic_action(obs, device)
+                        obs, reward, terminated, truncated, _ = env.step(
+                            np.array([action], dtype=np.float32)
+                        )
+                        ep_reward += reward
+                        done = terminated or truncated
+                    scores.append(ep_reward)
+            finally:
+                env.close()
+
+    if not scores:
+        return -np.inf
+    scores_arr = np.array(scores, dtype=np.float32)
+    if aggregate == "min":
+        return float(np.min(scores_arr))
+    if aggregate.startswith("p"):
+        percentile = float(aggregate[1:])
+        return float(np.percentile(scores_arr, percentile))
+    if aggregate == "median":
+        return float(np.median(scores_arr))
+    if aggregate != "mean":
+        raise ValueError(f"Unknown validation aggregate: {aggregate}")
+    return float(np.mean(scores_arr))
+
+
 # ── Main training loop ────────────────────────────────────────────────────────
 
 def train(cfg, variant: str = "base", plot: bool = True, show_plot: bool = True,
-          seed: int | None = None):
+          seed: int | None = None, init_checkpoint: str | None = None,
+          strict_init: bool = True):
     set_seed(seed)
     device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env_cfg = cfg["environment"]
@@ -239,6 +365,10 @@ def train(cfg, variant: str = "base", plot: bool = True, show_plot: bool = True,
             frame_skip       = env_cfg["frame_skip"],
             max_episode_steps= env_cfg["max_episode_steps"],
             termination_angle= env_cfg["termination_angle"],
+            angle_noise      = cfg.get("init", {}).get("angle_noise", 0.05),
+            vel_noise        = cfg.get("init", {}).get("vel_noise", 0.01),
+            reward_config    = cfg.get("rewards", {}),
+            parameter_regions= env_cfg.get("parameter_regions"),
             max_links        = env_cfg.get("max_links"),
         )
 
@@ -260,6 +390,32 @@ def train(cfg, variant: str = "base", plot: bool = True, show_plot: bool = True,
         variant, hidden=hidden, n_icga_layers=n_icga,
         n_heads=n_heads, max_links=max_links, max_force=max_force,
     )
+    if init_checkpoint:
+        state_dict = torch.load(init_checkpoint, map_location=device)
+        missing, unexpected = policy.load_state_dict(state_dict, strict=strict_init)
+        print(f"  initialized from learned checkpoint: {init_checkpoint}")
+        if not strict_init:
+            print(f"  non-strict init: {len(missing)} missing, {len(unexpected)} unexpected keys")
+    if "init_log_std" in ppo_cfg:
+        with torch.no_grad():
+            policy.log_std.fill_(float(ppo_cfg["init_log_std"]))
+        print(f"  set initial log_std to {float(policy.log_std.item()):+.3f}")
+    if ppo_cfg.get("freeze_log_std", False):
+        policy.log_std.requires_grad_(False)
+        print("  froze log_std during fine-tune")
+    trainable_prefixes = ppo_cfg.get("trainable_prefixes", [])
+    if trainable_prefixes:
+        trainable_prefixes = tuple(str(prefix) for prefix in trainable_prefixes)
+        for name, param in policy.named_parameters():
+            param.requires_grad_(name.startswith(trainable_prefixes))
+        trainable_count = sum(
+            p.numel() for p in policy.parameters() if p.requires_grad
+        )
+        print(
+            "  scoped fine-tune prefixes: "
+            + ", ".join(trainable_prefixes)
+            + f" ({trainable_count:,} trainable params)"
+        )
     policy.to(device)
 
     print(f"  CGAT-{variant}: hidden={hidden}, n_icga={n_icga}, n_heads={n_heads}, "
@@ -280,14 +436,32 @@ def train(cfg, variant: str = "base", plot: bool = True, show_plot: bool = True,
     value_coef     = ppo_cfg["value_coef"]
     max_grad_norm  = ppo_cfg["max_grad_norm"]
     total_steps    = ppo_cfg["total_steps"]
+    action_scale   = float(ppo_cfg.get("action_multiplier", 1.0))
+    if action_scale != 1.0:
+        print(f"  rollout action multiplier: {action_scale:.3f}")
 
     buffer = RolloutBuffer(rollout_steps, n_envs, max_nodes, max_edges,
                            gamma, gae_lambda)
 
     os.makedirs("checkpoints", exist_ok=True)
     best_mean_reward = -np.inf
+    best_val_reward = -np.inf
     best_model_path  = f"checkpoints/cgat_{variant}_ppo{seed_suffix(seed)}_best.pt"
+    best_val_model_path = f"checkpoints/cgat_{variant}_ppo{seed_suffix(seed)}_valbest.pt"
     legacy_model_path = f"checkpoints/cgat_{variant}_ppo_best.pt" if seed == 0 else None
+    val_cfg = cfg.get("validation", {})
+    val_points = val_cfg.get("points", [])
+    val_every = int(val_cfg.get("interval_updates", 0))
+    val_episodes = int(val_cfg.get("n_episodes", 1))
+    val_reward_config = val_cfg.get("reward_config")
+    val_aggregate = val_cfg.get("aggregate", "mean")
+    heatmap_val_cfg = val_cfg.get("heatmap", {})
+    heatmap_val_grid = int(heatmap_val_cfg.get("n_grid", 0))
+    heatmap_val_episodes = int(heatmap_val_cfg.get("n_episodes", val_episodes))
+    heatmap_val_aggregate = heatmap_val_cfg.get("aggregate", val_aggregate)
+    heatmap_val_reward_config = heatmap_val_cfg.get("reward_config", val_reward_config)
+    heatmap_val_seed = heatmap_val_cfg.get("seed", seed)
+    update_idx = 0
 
     obs_list   = [
         env.reset(seed=None if seed is None else seed + i)[0]
@@ -305,6 +479,7 @@ def train(cfg, variant: str = "base", plot: bool = True, show_plot: bool = True,
     t_start     = time.time()
 
     while global_step < total_steps:
+        update_idx += 1
 
         # LR annealing
         if anneal_lr:
@@ -323,6 +498,7 @@ def train(cfg, variant: str = "base", plot: bool = True, show_plot: bool = True,
                 actions_t, log_probs_t, _, values_t = policy.get_action_and_value(obs_t)
 
             actions_np   = actions_t.squeeze(-1).cpu().numpy()
+            env_actions_np = actions_np * action_scale
             log_probs_np = log_probs_t.cpu().numpy()
             values_np    = values_t.squeeze(-1).cpu().numpy()
 
@@ -330,7 +506,7 @@ def train(cfg, variant: str = "base", plot: bool = True, show_plot: bool = True,
             rewards_np    = np.zeros(n_envs, dtype=np.float32)
             dones_np      = np.zeros(n_envs, dtype=np.float32)
 
-            for n, (env, action) in enumerate(zip(envs, actions_np)):
+            for n, (env, action) in enumerate(zip(envs, env_actions_np)):
                 next_obs, reward, terminated, truncated, _ = env.step(
                     np.array([action], dtype=np.float32))
                 done = terminated or truncated
@@ -398,12 +574,36 @@ def train(cfg, variant: str = "base", plot: bool = True, show_plot: bool = True,
                 torch.save(state_dict, legacy_model_path)
             print(f"  *** new best {mean_r:.2f} → {best_model_path}")
 
+        val_msg = ""
+        if val_every > 0 and update_idx % val_every == 0 and (
+                val_points or heatmap_val_grid > 1):
+            if heatmap_val_grid > 1:
+                val_score = heatmap_validation_score(
+                    policy, cfg, device, heatmap_val_grid, heatmap_val_episodes,
+                    reward_config=heatmap_val_reward_config,
+                    aggregate=heatmap_val_aggregate,
+                    seed=heatmap_val_seed,
+                )
+                val_kind = f"heat{heatmap_val_grid}"
+            else:
+                val_score = deterministic_validation_score(
+                    policy, cfg, device, val_points, val_episodes,
+                    reward_config=val_reward_config,
+                    aggregate=val_aggregate,
+                )
+                val_kind = "val"
+            val_msg = f" | val {val_score:>7.2f}"
+            if val_score > best_val_reward:
+                best_val_reward = val_score
+                torch.save(policy.state_dict(), best_val_model_path)
+                print(f"  *** new {val_kind} best {val_score:.2f} → {best_val_model_path}")
+
         cur_lr = optimizer.param_groups[0]["lr"]
         print(f"step {global_step:>8} | eps {ep_count:>5} "
               f"| reward {mean_r:>7.2f} | ep_len {mean_len:>6.1f} "
               f"| surv {survival_pct:>5.1f}% "
               f"| {beta_label} "
-              f"| lr {cur_lr:.2e} | {elapsed:.0f}s")
+              f"| lr {cur_lr:.2e}{val_msg} | {elapsed:.0f}s")
 
     for env in envs:
         env.close()
@@ -463,9 +663,20 @@ if __name__ == "__main__":
         help="Save training plots without opening a blocking window")
     parser.add_argument("--seed", type=int, default=None,
         help="Random seed. Adds _seedN to checkpoint/plot names.")
+    parser.add_argument("--init-checkpoint", default=None,
+        help="Initialize from an existing learned CGAT checkpoint before PPO.")
+    parser.add_argument("--init-nonstrict", action="store_true",
+        help="Allow partial checkpoint initialization for architecture ablations.")
     args = parser.parse_args()
 
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
-    train(cfg, variant=args.variant, show_plot=not args.no_show, seed=args.seed)
+    train(
+        cfg,
+        variant=args.variant,
+        show_plot=not args.no_show,
+        seed=args.seed,
+        init_checkpoint=args.init_checkpoint,
+        strict_init=not args.init_nonstrict,
+    )

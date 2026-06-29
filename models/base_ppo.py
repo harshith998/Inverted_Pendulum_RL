@@ -37,8 +37,14 @@ class BasePPOPolicy(ABC, nn.Module):
         )
 
         self.mean_head  = nn.Linear(hidden // 2, 1)   # raw mean before tanh
-        self.log_std    = nn.Parameter(torch.zeros(1)) # learned scalar
+        self.log_std    = nn.Parameter(torch.full((1,), -1.5)) # learned scalar
         self.value_head = nn.Linear(hidden // 2, 1)   # V(s)
+
+        # Start fragile balance policies with near-zero commanded force. PPO can
+        # still explore through log_std, but the initial mean controller is not
+        # a random motor shove.
+        nn.init.zeros_(self.mean_head.weight)
+        nn.init.zeros_(self.mean_head.bias)
 
     # ------------------------------------------------------------------
     # Subclasses must implement this
@@ -57,6 +63,10 @@ class BasePPOPolicy(ABC, nn.Module):
         emb = self.encode(obs)
         return self.value_head(self.critic_trunk(emb))
 
+    def actor_mean(self, obs: dict, emb: torch.Tensor, actor_h: torch.Tensor) -> torch.Tensor:
+        """Return the raw pre-tanh action mean."""
+        return self.mean_head(actor_h)
+
     def get_action_and_value(self, obs: dict, action: torch.Tensor | None = None):
         """
         Sample (or evaluate) an action.
@@ -72,7 +82,7 @@ class BasePPOPolicy(ABC, nn.Module):
         actor_h   = self.actor_trunk(emb)
         critic_h  = self.critic_trunk(emb)
 
-        raw_mean  = self.mean_head(actor_h)           # (B, 1)  unbounded
+        raw_mean  = self.actor_mean(obs, emb, actor_h)  # (B, 1)  unbounded
 
         log_std   = self.log_std.clamp(LOG_STD_MIN, LOG_STD_MAX)
         std       = log_std.exp().expand_as(raw_mean)
@@ -142,6 +152,6 @@ class BasePPOPolicy(ABC, nn.Module):
         }
         emb = self.encode(obs_t)
         actor_h = self.actor_trunk(emb)
-        raw_mean = self.mean_head(actor_h)
+        raw_mean = self.actor_mean(obs_t, emb, actor_h)
         action = torch.tanh(raw_mean) * self.max_force
         return float(action.squeeze())

@@ -1,0 +1,100 @@
+environment:
+  n_links_range: [3, 3]
+  max_links: 3
+  nominal_eval_n_links: 3
+  topology_eval_n_links: [3]
+  cart_mass_range: [0.5, 3.0]
+  link_length_range: [0.3, 1.2]
+  link_mass_range: [0.1, 2.0]
+  parameter_regions:
+    - weight: 1.0
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.3, 1.2]
+      link_mass_range: [0.1, 2.0]
+    - weight: 1.5
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.3, 0.7]
+      link_mass_range: [1.2, 2.0]
+    - weight: 1.5
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.8, 1.2]
+      link_mass_range: [1.2, 2.0]
+  rail_limit: 2.5
+  max_force: 20.0
+  timestep: 0.001
+  frame_skip: 4
+  max_episode_steps: 1000
+  termination_angle: 0.7854
+
+graph:
+  node_feat_dim: 9
+  edge_feat_dim: 2
+
+rewards:
+  upright_weight: 1.0
+  alive_bonus: 0.1
+  force_penalty: 0.001
+  rail_penalty: 0.01
+
+init:
+  angle_noise: 0.05
+  vel_noise: 0.01
+
+validation:
+  interval_updates: 3
+  n_episodes: 2
+  aggregate: p25
+  reward_config:
+    upright_weight: 1.0
+    alive_bonus: 0.1
+    force_penalty: 0.001
+    rail_penalty: 0.01
+  points:
+    - [0.08, 0.2]
+    - [0.08, 1.8]
+    - [0.18, 0.3]
+    - [0.18, 1.8]
+    - [0.30, 0.3]
+    - [0.30, 1.8]
+    - [0.50, 0.6]
+    - [0.50, 1.8]
+    - [0.75, 0.6]
+    - [0.75, 1.05]
+    - [0.75, 1.8]
+    - [1.05, 0.6]
+    - [1.05, 1.8]
+    - [1.20, 2.0]
+    - [1.45, 2.4]
+    - [1.70, 3.0]
+    - [1.95, 3.6]
+    - [2.10, 3.9]
+
+ppo:
+  hidden_dim: 128
+  n_layers: 3
+  n_heads: 4
+  dropout: 0.1
+  n_envs: 4
+  rollout_steps: 4096
+  n_epochs: 8
+  mini_batch_size: 256
+  gamma: 0.995
+  gae_lambda: 0.97
+  clip_epsilon: 0.06
+  value_coef: 0.5
+  entropy_coef: 0.00003
+  init_log_std: -2.4
+  freeze_log_std: true
+  trainable_prefixes:
+    - linear_action_scale
+    - critic_trunk
+    - value_head
+  lr: 0.00003
+  anneal_lr: false
+  max_grad_norm: 0.25
+  total_steps: 500000
+  save_interval: 100000
+  cgat:
+    n_icga_layers: 2
+    n_heads: 2
+    entropy_coef: 0.00003

@@ -1,0 +1,108 @@
+environment:
+  n_links_range: [3, 3]
+  max_links: 3
+  nominal_eval_n_links: 3
+  topology_eval_n_links: [3]
+  cart_mass_range: [0.5, 3.0]
+  link_length_range: [0.3, 1.2]
+  link_mass_range: [0.1, 2.0]
+  parameter_regions:
+    - weight: 1.0
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.3, 1.2]
+      link_mass_range: [0.1, 2.0]
+    - weight: 2.0
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.05, 0.75]
+      link_mass_range: [0.05, 1.4]
+    - weight: 3.0
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.05, 0.95]
+      link_mass_range: [1.4, 3.9]
+    - weight: 2.0
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.95, 2.1]
+      link_mass_range: [0.05, 3.9]
+  rail_limit: 2.5
+  max_force: 20.0
+  timestep: 0.001
+  frame_skip: 4
+  max_episode_steps: 1000
+  termination_angle: 0.7854
+
+graph:
+  node_feat_dim: 9
+  edge_feat_dim: 2
+
+rewards:
+  upright_weight: 1.0
+  alive_bonus: 0.20
+  force_penalty: 0.0007
+  action_rate_penalty: 0.00003
+  rail_penalty: 0.008
+  angle_penalty: 0.0005
+  angular_velocity_penalty: 0.00003
+  cart_velocity_penalty: 0.00005
+  angle_margin_weight: 0.12
+  rail_margin_weight: 0.05
+  failure_penalty: 0.40
+
+init:
+  angle_noise: 0.05
+  vel_noise: 0.01
+
+validation:
+  interval_updates: 1
+  n_episodes: 1
+  aggregate: mean
+  reward_config:
+    upright_weight: 1.0
+    alive_bonus: 0.1
+    force_penalty: 0.001
+    rail_penalty: 0.01
+  heatmap:
+    n_grid: 5
+    n_episodes: 1
+    aggregate: mean
+    seed: 410
+    reward_config:
+      upright_weight: 1.0
+      alive_bonus: 0.1
+      force_penalty: 0.001
+      rail_penalty: 0.01
+
+ppo:
+  hidden_dim: 128
+  n_layers: 3
+  n_heads: 4
+  dropout: 0.1
+  n_envs: 6
+  rollout_steps: 1024
+  n_epochs: 4
+  mini_batch_size: 256
+  gamma: 0.998
+  gae_lambda: 0.98
+  clip_epsilon: 0.025
+  value_coef: 0.55
+  entropy_coef: 0.00002
+  init_log_std: -2.25
+  freeze_log_std: true
+  trainable_prefixes:
+    - log_scale_table
+    - log_scale_clip
+    - length_bandwidth
+    - mass_bandwidth
+    - param_residual_net
+    - actor_trunk
+    - mean_head
+    - critic_trunk
+    - value_head
+  lr: 0.0000015
+  anneal_lr: false
+  max_grad_norm: 0.10
+  total_steps: 70000
+  save_interval: 35000
+  cgat:
+    n_icga_layers: 2
+    n_heads: 2
+    entropy_coef: 0.00002
