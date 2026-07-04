@@ -306,7 +306,9 @@ def run_test25(policy, cfg, device, n_episodes, stochastic_eval=False):
 
 # ── Test 3 — topology-aware heatmaps ─────────────────────────────────────────
 
-def run_test3(policy, cfg, device, n_episodes, n_grid, stochastic_eval=False):
+def run_test3(policy, cfg, device, n_episodes, n_grid, stochastic_eval=False,
+              partial_path: str | None = None, partial_every: int = 10,
+              resume_partial: bool = False):
     env_cfg = cfg["environment"]
     len_lo,  len_hi  = env_cfg["link_length_range"]
     mass_lo, mass_hi = env_cfg["link_mass_range"]
@@ -318,6 +320,32 @@ def run_test3(policy, cfg, device, n_episodes, n_grid, stochastic_eval=False):
     length_vals = np.linspace(len_eval_lo,  len_eval_hi,  n_grid)
     mass_vals   = np.linspace(mass_eval_lo, mass_eval_hi, n_grid)
     reward_cube = np.full((len(n_links_vals), n_grid, n_grid), np.nan)
+
+    if resume_partial and partial_path and os.path.exists(partial_path):
+        partial = np.load(partial_path)
+        saved_rewards = partial["rewards"]
+        if saved_rewards.shape == reward_cube.shape:
+            reward_cube[:] = saved_rewards
+            print(f"  Resuming partial heatmap from {partial_path}")
+        else:
+            print(
+                f"  [warn] partial heatmap shape {saved_rewards.shape} "
+                f"does not match {reward_cube.shape}; ignoring"
+            )
+
+    def save_partial():
+        if not partial_path:
+            return
+        np.savez(
+            partial_path,
+            lengths=length_vals,
+            masses=mass_vals,
+            n_links=np.array(n_links_vals),
+            rewards=reward_cube,
+            len_bounds=np.array((len_lo, len_hi)),
+            mass_bounds=np.array((mass_lo, mass_hi)),
+            train_topology=np.array(tuple(env_cfg["n_links_range"])),
+        )
 
     total = len(n_links_vals) * n_grid * n_grid
     print(f"\n{'='*60}")
@@ -331,6 +359,9 @@ def run_test3(policy, cfg, device, n_episodes, n_grid, stochastic_eval=False):
     for k, n_links in enumerate(n_links_vals):
         for i, length in enumerate(length_vals):
             for j, mass in enumerate(mass_vals):
+                if np.isfinite(reward_cube[k, j, i]):
+                    done += 1
+                    continue
                 env = make_fixed_env(
                     cfg, link_length=length, link_mass=mass, n_links=n_links)
                 r = eval_point(policy, env, n_episodes, device,
@@ -341,6 +372,10 @@ def run_test3(policy, cfg, device, n_episodes, n_grid, stochastic_eval=False):
                 if done % 10 == 0 or done == total:
                     print(f"  [{done:4d}/{total}] n_links={n_links} "
                           f"length={length:.3f}m  mass={mass:.3f}kg  reward={r:.2f}")
+                if partial_path and (
+                    done % max(1, partial_every) == 0 or done == total
+                ):
+                    save_partial()
 
     return (length_vals, mass_vals, reward_cube, np.array(n_links_vals),
             (len_lo, len_hi), (mass_lo, mass_hi), tuple(env_cfg["n_links_range"]))
@@ -531,6 +566,12 @@ def main():
     parser.add_argument("--n_eval_episodes", type=int, default=N_EVAL_EPISODES)
     parser.add_argument("--n_sweep_points",  type=int, default=N_SWEEP_POINTS)
     parser.add_argument("--n_grid",          type=int, default=N_GRID_1D)
+    parser.add_argument("--heatmap_partial", default=None,
+        help="Optional .npz path for Test 3 partial-save/resume data")
+    parser.add_argument("--heatmap_partial_every", type=int, default=10,
+        help="Save Test 3 partial results every N cells when --heatmap_partial is set")
+    parser.add_argument("--resume_heatmap", action="store_true",
+        help="Resume Test 3 from --heatmap_partial if it exists")
     parser.add_argument("--stochastic_eval", action="store_true",
         help="Sample from the Gaussian during eval instead of using the mean action")
     parser.add_argument("--few_shot_budgets", nargs="+", type=int,
@@ -650,7 +691,10 @@ def main():
     if "3" in args.tests:
         l_v, m_v, r_cube, n_vals, l_bounds, m_bounds, topo_bounds = run_test3(
             policy, cfg, device, args.n_eval_episodes, args.n_grid,
-            stochastic_eval=args.stochastic_eval)
+            stochastic_eval=args.stochastic_eval,
+            partial_path=args.heatmap_partial,
+            partial_every=args.heatmap_partial_every,
+            resume_partial=args.resume_heatmap)
         plot_topology_heatmaps(
             l_v, m_v, r_cube, n_vals, l_bounds, m_bounds, topo_bounds,
             f"OOD Heatmaps | CGAT-{variant} PPO",

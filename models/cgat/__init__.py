@@ -28,6 +28,7 @@ Variants
   mass_force_schedule — param_residual + trainable mass-conditioned force scale
   poly_force_schedule — param_residual + polynomial length/mass force scale
   rbf_force_schedule — param_residual + RBF length/mass force scale
+  rbf_gated_specialist — rbf_force_schedule + gated learned residual experts
   rbf_state_force_schedule — rbf_force_schedule + state-dependent rescue scale
   rbf_damping_schedule — rbf_force_schedule + compact learned damping residual
   force_residual — param_residual + bounded learned raw-action residual expert
@@ -67,6 +68,7 @@ from .cgat_mass_schedule import CGATMassSchedulePPOPolicy
 from .cgat_mass_force_schedule import CGATMassForceSchedulePPOPolicy
 from .cgat_poly_force_schedule import CGATPolyForceSchedulePPOPolicy
 from .cgat_rbf_force_schedule import CGATRBFForceSchedulePPOPolicy
+from .cgat_rbf_gated_specialist import CGATRBFGatedSpecialistPPOPolicy
 from .cgat_rbf_state_force_schedule import CGATRBFStateForceSchedulePPOPolicy
 from .cgat_rbf_damping_schedule import CGATRBFDampingSchedulePPOPolicy
 from .cgat_force_residual import CGATForceResidualPPOPolicy
@@ -101,6 +103,7 @@ VARIANTS: dict = {
     "mass_force_schedule": CGATMassForceSchedulePPOPolicy,
     "poly_force_schedule": CGATPolyForceSchedulePPOPolicy,
     "rbf_force_schedule": CGATRBFForceSchedulePPOPolicy,
+    "rbf_gated_specialist": CGATRBFGatedSpecialistPPOPolicy,
     "rbf_state_force_schedule": CGATRBFStateForceSchedulePPOPolicy,
     "rbf_damping_schedule": CGATRBFDampingSchedulePPOPolicy,
     "force_residual": CGATForceResidualPPOPolicy,

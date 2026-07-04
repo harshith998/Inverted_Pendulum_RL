@@ -1,0 +1,98 @@
+environment:
+  n_links_range: [3, 3]
+  max_links: 3
+  nominal_eval_n_links: 3
+  topology_eval_n_links: [3]
+  cart_mass_range: [0.5, 3.0]
+  link_length_range: [0.3, 1.2]
+  link_mass_range: [0.1, 2.0]
+  parameter_regions:
+    - weight: 1.0
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.3, 1.2]
+      link_mass_range: [0.1, 2.0]
+    - weight: 4.0
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.05, 0.9]
+      link_mass_range: [1.2, 3.9]
+    - weight: 2.0
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.05, 0.9]
+      link_mass_range: [0.05, 1.2]
+    - weight: 2.0
+      cart_mass_range: [0.5, 3.0]
+      link_length_range: [0.9, 2.1]
+      link_mass_range: [0.05, 3.9]
+  rail_limit: 2.5
+  max_force: 20.0
+  timestep: 0.001
+  frame_skip: 4
+  max_episode_steps: 1000
+  termination_angle: 0.7854
+
+graph:
+  node_feat_dim: 9
+  edge_feat_dim: 2
+
+rewards:
+  upright_weight: 1.0
+  alive_bonus: 0.2
+  force_penalty: 0.00055
+  rail_penalty: 0.009
+  angle_margin_weight: 0.12
+  rail_margin_weight: 0.04
+  failure_penalty: 0.3
+
+init:
+  angle_noise: 0.05
+  vel_noise: 0.01
+
+validation:
+  interval_updates: 1
+  n_episodes: 1
+  aggregate: mean
+  reward_config:
+    upright_weight: 1.0
+    alive_bonus: 0.1
+    force_penalty: 0.001
+    rail_penalty: 0.01
+  heatmap:
+    n_grid: 5
+    n_episodes: 1
+    aggregate: mean
+    seed: 385
+    reward_config:
+      upright_weight: 1.0
+      alive_bonus: 0.1
+      force_penalty: 0.001
+      rail_penalty: 0.01
+
+ppo:
+  hidden_dim: 128
+  n_layers: 3
+  n_heads: 4
+  dropout: 0.1
+  n_envs: 6
+  rollout_steps: 1024
+  n_epochs: 8
+  mini_batch_size: 256
+  gamma: 0.998
+  gae_lambda: 0.98
+  clip_epsilon: 0.08
+  value_coef: 0.50
+  entropy_coef: 0.00008
+  init_log_std: -1.85
+  freeze_log_std: true
+  trainable_prefixes:
+    - param_action_scale_net
+    - critic_trunk
+    - value_head
+  lr: 0.0008
+  anneal_lr: false
+  max_grad_norm: 0.50
+  total_steps: 60000
+  save_interval: 30000
+  cgat:
+    n_icga_layers: 2
+    n_heads: 2
+    entropy_coef: 0.00008
